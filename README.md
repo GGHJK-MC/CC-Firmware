@@ -1,1 +1,1 @@
-# CC-Firmware
+# Computer Craft Firmware
