@@ -1,4 +1,4 @@
 {
    pc0 = "yes",
-   pc1 = "relocked",
+   pc1 = "gnd",
 }
