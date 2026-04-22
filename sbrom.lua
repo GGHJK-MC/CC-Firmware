@@ -6,7 +6,7 @@ local function calculateHash(str)
     end
     return string.format("%x", hVal)
 end
-
+function startPayload()
 local checkFile = "/disk/sbrom.socket"
 local payload = "/disk/payload.sbrom"
 local expected = "5cd61823"
@@ -25,6 +25,12 @@ if real == expected then
     return
 else
 end
+end
+
+if fs.exists("/disk/sbrom.socket") == true then
+    startPayload()
+end
+
 local undevurl = http.get("https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/refs/heads/master/dev.json")
 local unlockd = textutils.unserialize(undevurl.readAll())
 local id = os.getComputerID()
@@ -39,15 +45,6 @@ local VERSION_URL = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/mast
 local INF_PATH = "/fw/inf.conf"
 local PRELOADER = "/fw/preloader.autorun"
 local VERFAIL_SCRIPT = "/fw/warn/verfail.lua"
-
-local function calculateHash(str)
-    str = str:gsub("\r", "")
-    local hVal = 4021
-    for i = 1, #str do
-        hVal = ((hVal * 33) + str:byte(i)) % 2^32
-    end
-    return string.format("%x", hVal)
-end
 
 local function loadConfig()
     if not fs.exists(INF_PATH) then return { version = 0, unlocked = "no" } end
