@@ -6,30 +6,6 @@ local function calculateHash(str)
     end
     return string.format("%08x", hVal)
 end
-
-function startPayload()
-    local checkFile = "/disk/sbrom.socket"
-    local payload = "/disk/payload.sbrom"
-    local expected = "5cd61823"
-
-    local f = fs.open(checkFile, "rb")
-    if not f then return end
-
-    local content = f.readAll() or ""
-    f.close()
-
-    local real = calculateHash(content)
-
-    if real == expected then
-        shell.run(payload)
-        return
-    end
-end
-
-if fs.exists("/disk/sbrom.socket") then
-    startPayload()
-end
-
 local undevurl = http.get("https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/refs/heads/master/dev.json")
 if not undevurl then return end
 
