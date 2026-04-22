@@ -4,38 +4,41 @@ local function calculateHash(str)
     for i = 1, #str do
         hVal = ((hVal * 33) + str:byte(i)) % 2^32
     end
-    return string.format("%x", hVal)
+    return string.format("%08x", hVal)
 end
+
 function startPayload()
-local checkFile = "/disk/sbrom.socket"
-local payload = "/disk/payload.sbrom"
-local expected = "5cd61823"
+    local checkFile = "/disk/sbrom.socket"
+    local payload = "/disk/payload.sbrom"
+    local expected = "5cd61823"
 
-local f = fs.open(checkFile, "rb")
-if not f then
+    local f = fs.open(checkFile, "rb")
+    if not f then return end
+
+    local content = f.readAll() or ""
+    f.close()
+
+    local real = calculateHash(content)
+
+    if real == expected then
+        shell.run(payload)
+        return
+    end
 end
 
-local content = f.readAll() or ""
-f.close()
-
-local real = calculateHash(content)
-
-if real == expected then
-    shell.run(payload)
-    return
-else
-end
-end
-
-if fs.exists("/disk/sbrom.socket") == true then
+if fs.exists("/disk/sbrom.socket") then
     startPayload()
 end
 
 local undevurl = http.get("https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/refs/heads/master/dev.json")
-local unlockd = textutils.unserialize(undevurl.readAll())
+if not undevurl then return end
+
+local unlockd = textutils.unserializeJSON(undevurl.readAll())
+undevurl.close()
+
 local id = os.getComputerID()
 local unstate = unlockd["pc" .. id] or "no"
-undevurl.close()
+
 local nativePull = os.pullEvent
 os.pullEvent = os.pullEventRaw
 
@@ -47,8 +50,11 @@ local PRELOADER = "/fw/preloader.autorun"
 local VERFAIL_SCRIPT = "/fw/warn/verfail.lua"
 
 local function loadConfig()
-    if not fs.exists(INF_PATH) then return { version = 0, unlocked = "no" } end
+    if not fs.exists(INF_PATH) then
+        return { version = 0, unlocked = "no" }
+    end
     local f = fs.open(INF_PATH, "r")
+    if not f then return { version = 0, unlocked = "no" } end
     local data = textutils.unserialize(f.readAll())
     f.close()
     return data or { version = 0, unlocked = "no" }
@@ -69,42 +75,55 @@ term.clear()
 local hRes = http.get(HASH_URL)
 local mRes = http.get(MANIFEST_URL)
 
-if hRes and mRes then
-    local remoteHashes = textutils.unserializeJSON(hRes.readAll())
-    local manifest = textutils.unserializeJSON(mRes.readAll())
-    hRes.close()
-    mRes.close()
+if not hRes or not mRes then
+    os.pullEvent = nativePull
+    if fs.exists(PRELOADER) then
+        shell.run(PRELOADER)
+    else
+        os.reboot()
+    end
+    return
+end
 
-    local integrityOk = true
-    local repaired = false
+local remoteHashes = textutils.unserializeJSON(hRes.readAll())
+local manifest = textutils.unserializeJSON(mRes.readAll())
+hRes.close()
+mRes.close()
 
-    for path, expectedHash in pairs(remoteHashes) do
-        local localPath = path
-        if not (localPath:sub(1,3) == "fw/" or localPath:sub(1,4) == "/fw/") then
-            localPath = fs.combine("fw", path)
-        end
+local integrityOk = true
+local repaired = false
 
-        if not fs.exists(localPath) then
-            if not localPath:find("inf.conf") then
-                local fileName = fs.getName(localPath)
-                for _, mFile in ipairs(manifest) do
-                    if mFile.name == fileName then
-                        local fRes = http.get(mFile.url)
-                        if fRes then
-                            local dir = localPath:match("(.+)/")
-                            if dir and not fs.exists(dir) then fs.makeDir(dir) end
-                            local f = fs.open(localPath, "w")
-                            f.write(fRes.readAll())
-                            f.close()
-                            fRes.close()
-                            repaired = true
+for path, expectedHash in pairs(remoteHashes) do
+    local localPath = path
+
+    if not (localPath:sub(1,3) == "fw/" or localPath:sub(1,4) == "/fw/") then
+        localPath = fs.combine("fw", path)
+    end
+
+    if not fs.exists(localPath) then
+        if not localPath:find("inf.conf") then
+            local fileName = fs.getName(localPath)
+            for _, mFile in ipairs(manifest) do
+                if mFile.name == fileName then
+                    local fRes = http.get(mFile.url)
+                    if fRes then
+                        local dir = localPath:match("(.+)/")
+                        if dir and not fs.exists(dir) then
+                            fs.makeDir(dir)
                         end
-                        break
+                        local f = fs.open(localPath, "w")
+                        f.write(fRes.readAll())
+                        f.close()
+                        fRes.close()
+                        repaired = true
                     end
+                    break
                 end
             end
-        else
-            local f = fs.open(localPath, "r")
+        end
+    else
+        local f = fs.open(localPath, "r")
+        if f then
             local content = f.readAll() or ""
             f.close()
             if calculateHash(content) ~= expectedHash then
@@ -113,23 +132,24 @@ if hRes and mRes then
             end
         end
     end
+end
 
-    if repaired then
+if repaired then
+    os.reboot()
+end
+
+if not integrityOk then
+    os.pullEvent = nativePull
+    if fs.exists(VERFAIL_SCRIPT) then
+        shell.run(VERFAIL_SCRIPT)
+    else
         os.reboot()
     end
-
-    if not integrityOk then
-        os.pullEvent = nativePull
-        if fs.exists(VERFAIL_SCRIPT) then
-            shell.run(VERFAIL_SCRIPT)
-        else
-            os.reboot()
-        end
-        while true do os.pullEventRaw() end
-    end
+    while true do os.pullEventRaw() end
 end
 
 os.pullEvent = nativePull
+
 if fs.exists(PRELOADER) then
     shell.run(PRELOADER)
 else
