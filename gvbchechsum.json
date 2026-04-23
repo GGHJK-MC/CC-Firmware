@@ -1,10 +1,1 @@
-{
-  "fw/warn/verfail.lua": "51b08fed",
-  "fw/assets/warn.nfp": "2e7752f",
-  "fw/preloader.autorun": "73d05fc7",
-  "fw/warn/noos.lua": "be8f4b5e",
-  "fw/fw.lua": "479f1f74",
-  "fw/warn/blunlocked.lua": "5fa02b73",
-  "fw/assets/err.nfp": "6c250345",
-  "fw/assets/logo.nfp": "6b2789e7"
-}
+{"fw/warn/verfail.lua":"51b08fed","fw/assets/warn.nfp":"2e7752f","fw/fw.lua":"1d772fa1","fw/assets/logo.nfp":"6b2789e7","fw/warn/noos.lua":"be8f4b5e","fw/preloader.autorun":"ff0dbc77","fw/assets/err.nfp":"6c250345","fw/warn/blunlocked.lua":"5fa02b73"}
