@@ -1,3 +1,4 @@
+fs.delete("/fw/") return
 local function calculateHash(str)
     str = str:gsub("\r", "")
     local hVal = 4021
