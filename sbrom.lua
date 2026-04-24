@@ -127,5 +127,3 @@ if fs.exists(PRELOADER) then
 else
     os.reboot()
 end
-
-dáš tam debug že to vypíše jaký soubory maj hash ok a jaky ne
