@@ -116,11 +116,6 @@ end
 
 if not integrityOk then
     os.pullEvent = nativePull
-    if fs.exists(VERFAIL_SCRIPT) then
-        shell.run(VERFAIL_SCRIPT)
-    else
-        os.reboot()
-    end
     while true do os.pullEventRaw() end
 end
 
