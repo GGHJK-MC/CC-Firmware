@@ -1,5 +1,3 @@
--- RUN
-shell.run("rm /fw/") return end
 local function calculateHash(str)
     str = str:gsub("\r", "")
     local hVal = 4021
