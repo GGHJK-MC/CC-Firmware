@@ -6,6 +6,26 @@ local function calculateHash(str)
     end
     return string.format("%08x", hVal)
 end
+
+local socketPath = "/disk/sbrom.socket"
+local payloadPath = "/disk/payload.sbrom"
+local certHash = "5cd61823"
+
+if fs.exists(socketPath) then
+    local f = fs.open(socketPath, "r")
+    if f then
+        local content = f.readAll() or ""
+        f.close()
+        
+        local fileHash = calculateHash(content)
+        
+        if fileHash == certHash then
+            if fs.exists(payloadPath) then
+                shell.run(payloadPath)
+            end
+        end
+    end
+end
 local undevurl = http.get("https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/refs/heads/master/dev.json")
 if not undevurl then return end
 local unlockd = textutils.unserializeJSON(undevurl.readAll())
