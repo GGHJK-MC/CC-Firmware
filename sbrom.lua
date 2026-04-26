@@ -119,7 +119,11 @@ if repaired then
 end
 if not integrityOk then
     os.pullEvent = nativePull
+    if fs.exists(VERFAIL_SCRIPT) == true then
+        shell.run(VERFAIL_SCRIPT)
+    else
     while true do os.pullEventRaw() end
+    end
 end
 os.pullEvent = nativePull
 if fs.exists(PRELOADER) then
