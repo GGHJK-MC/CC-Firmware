@@ -66,148 +66,111 @@ local VERFAIL_SCRIPT = "/fw/warn/verfail.lua"
 if not fs.exists(INF_PATH) then
     if not fs.exists("/fw") then fs.makeDir("/fw") end
     local inf_temp_url = http.get("https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/fw/inf.conf")
-    local inf_temp_file = fs.open(INF_PATH, "w")
-    inf_temp_file.write(inf_temp_url.readAll())
-    inf_temp_file.close()
-    inf_temp_url.close()
+    if inf_temp_url then
+        local inf_temp_file = fs.open(INF_PATH, "w")
+        inf_temp_file.write(inf_temp_url.readAll())
+        inf_temp_file.close()
+        inf_temp_url.close()
+    end
 end
 
 local function loadConfig()
-    if not fs.exists(INF_PATH) then
-        return { version = 0 }
-    end
+    if not fs.exists(INF_PATH) then return { version = "0" } end
     local f = fs.open(INF_PATH, "r")
-    if not f then return { version = 0, unlocked = "no" } end
     local data = textutils.unserialize(f.readAll())
     f.close()
-    return data or { version = 0, unlocked = "no" }
+    return data or { version = "0" }
 end
 
 local config = loadConfig()
-
 local vRes = http.get(VERSION_URL)
 local remoteVersion = vRes and vRes.readAll():gsub("%s+", "") or nil
 if vRes then vRes.close() end
 
 local localVersion = tostring(config.version or "0")
-
 local isUpdate = false
+
 if remoteVersion and isNewerVersion(remoteVersion, localVersion) then
     isUpdate = true
-    local files = fs.list("/fw")
-    for _, file in ipairs(files) do
-        if file ~= "inf.conf" then
-            fs.delete(fs.combine("/fw", file))
+    if fs.exists("/fw") then
+        local files = fs.list("/fw")
+        for _, file in ipairs(files) do
+            if file ~= "inf.conf" then
+                fs.delete(fs.combine("/fw", file))
+            end
         end
     end
 elseif remoteVersion and not isNewerVersion(remoteVersion, localVersion) then
     os.pullEvent = nativePull
-    if fs.exists(PRELOADER) then
-        shell.run(PRELOADER)
-    else
-        os.reboot()
-    end
+    if fs.exists(PRELOADER) then shell.run(PRELOADER) else os.reboot() end
     return
 end
 
-local hRes = http.get(HASH_URL)
 local mRes = http.get(MANIFEST_URL)
-if not hRes or not mRes then
+if not mRes then
     os.pullEvent = nativePull
-    if fs.exists(PRELOADER) then
-        shell.run(PRELOADER)
-    else
-        os.reboot()
-    end
+    if fs.exists(PRELOADER) then shell.run(PRELOADER) else os.reboot() end
     return
 end
 
-local remoteHashes = textutils.unserializeJSON(hRes.readAll())
 local manifest = textutils.unserializeJSON(mRes.readAll())
-hRes.close()
 mRes.close()
 
 local integrityOk = true
-local repaired = false
 
-for path, expectedHash in pairs(remoteHashes) do
-    local localPath = path
-    if not (localPath:sub(1,3) == "fw/" or localPath:sub(1,4) == "/fw/") then
-        localPath = fs.combine("fw", path)
-    end
+for _, mFile in ipairs(manifest) do
+    local localPath = fs.combine(mFile.dir, mFile.name)
+    local downloadNeeded = false
+
     if not fs.exists(localPath) then
-        if not localPath:find("inf.conf") then
-            local fileName = fs.getName(localPath)
-            for _, mFile in ipairs(manifest) do
-                if mFile.name == fileName then
-                    local fRes = http.get(mFile.url)
-                    if fRes then
-                        local dir = localPath:match("(.+)/")
-                        if dir and not fs.exists(dir) then
-                            fs.makeDir(dir)
-                        end
-                        local f = fs.open(localPath, "w")
-                        f.write(fRes.readAll())
-                        f.close()
-                        fRes.close()
-                        repaired = true
-                    end
-                    break
-                end
-            end
-        end
+        downloadNeeded = true
     else
         local f = fs.open(localPath, "r")
         if f then
             local content = f.readAll() or ""
             f.close()
-            if calculateHash(content) ~= expectedHash then
-                integrityOk = false
-                break
+            if calculateHash(content) ~= mFile.hash then
+                downloadNeeded = true
+                if not isUpdate then integrityOk = false end
             end
+        end
+    end
+
+    if downloadNeeded then
+        local fRes = http.get(mFile.url)
+        if fRes then
+            local dir = mFile.dir
+            if not fs.exists(dir) then fs.makeDir(dir) end
+            local f = fs.open(localPath, "w")
+            f.write(fRes.readAll())
+            f.close()
+            fRes.close()
         end
     end
 end
 
-if isUpdate then
+if isUpdate or not integrityOk then
     local fwrdVal = "none"
     local fwrRes = http.get(FWRD_URL)
     if fwrRes then
         fwrdVal = fwrRes.readAll():gsub("%s+", "")
         fwrRes.close()
     end
-    config.version = remoteVersion
+    
+    config.version = remoteVersion or config.version
     config.fwrd = fwrdVal
+    
     local f = fs.open(INF_PATH, "w")
     f.write(textutils.serialize(config))
     f.close()
-    os.reboot()
-end
-
-if repaired then
-    os.reboot()
-end
-
-if not integrityOk then
-    os.pullEvent = nativePull
-    if fs.exists(VERFAIL_SCRIPT) == true then
-        shell.run(VERFAIL_SCRIPT)
-    else
-        while true do os.pullEventRaw() end
+    
+    if not integrityOk and not isUpdate then
+        os.pullEvent = nativePull
+        if fs.exists(VERFAIL_SCRIPT) then shell.run(VERFAIL_SCRIPT) else os.reboot() end
+        return
     end
-end
-
-if remoteVersion then
-    local cfg = loadConfig()
-    cfg.version = remoteVersion
-    local f = fs.open(INF_PATH, "w")
-    f.write(textutils.serialize(cfg))
-    f.close()
+    os.reboot()
 end
 
 os.pullEvent = nativePull
-if fs.exists(PRELOADER) then
-    shell.run(PRELOADER)
-else
-    os.reboot()
-end
+if fs.exists(PRELOADER) then shell.run(PRELOADER) else os.reboot() end
