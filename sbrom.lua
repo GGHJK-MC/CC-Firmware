@@ -116,9 +116,70 @@ end
 local manifest = textutils.unserializeJSON(mRes.readAll())
 mRes.close()
 
+-- Loading screen setup
+local w, h = term.getSize()
+local images = {
+    paintutils.loadImage("update1.nfp"),
+    paintutils.loadImage("update2.nfp"),
+}
+local labelText = "Instalace aktualizace systemu"
+local barWidth = 20
+local barX = math.floor((w - barWidth) / 2) + 1
+local barY = h - 1
+
+local imgW = 0
+for _, row in ipairs(images[1]) do
+    if #row > imgW then imgW = #row end
+end
+local imgH = #images[1]
+local imgX = math.floor((w - imgW) / 2) + 1
+local imgY = math.floor((h - imgH - 4) / 2) + 1
+local textX = math.floor((w - #labelText) / 2) + 1
+local textY = imgY + imgH + 1
+
+local frameIdx = 1
+local lastFrameTime = os.clock()
+
+local function drawBar(progress)
+    local filled = math.floor(barWidth * progress)
+    for x = 0, barWidth - 1 do
+        term.setCursorPos(barX + x, barY)
+        if x < filled then
+            term.setBackgroundColor(colors.lightBlue)
+        else
+            term.setBackgroundColor(colors.gray)
+        end
+        term.write(" ")
+    end
+end
+
+local function drawFrame(progress)
+    local now = os.clock()
+    if now - lastFrameTime >= 1 then
+        frameIdx = (frameIdx % #images) + 1
+        lastFrameTime = now
+    end
+
+    term.setBackgroundColor(colors.black)
+    term.clear()
+
+    paintutils.drawImage(images[frameIdx], imgX, imgY)
+
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
+    term.setCursorPos(textX, textY)
+    term.write(labelText)
+
+    drawBar(progress)
+end
+
+-- File download loop with realtime progress
+local total = #manifest
 local integrityOk = true
 
-for _, mFile in ipairs(manifest) do
+for idx, mFile in ipairs(manifest) do
+    drawFrame((idx - 1) / total)
+
     local localPath = fs.combine(mFile.dir, mFile.name)
     local downloadNeeded = false
 
@@ -147,6 +208,8 @@ for _, mFile in ipairs(manifest) do
             fRes.close()
         end
     end
+
+    drawFrame(idx / total)
 end
 
 if isUpdate or not integrityOk then
@@ -156,14 +219,14 @@ if isUpdate or not integrityOk then
         fwrdVal = fwrRes.readAll():gsub("%s+", "")
         fwrRes.close()
     end
-    
+
     config.version = remoteVersion or config.version
     config.fwrd = fwrdVal
-    
+
     local f = fs.open(INF_PATH, "w")
     f.write(textutils.serialize(config))
     f.close()
-    
+
     if not integrityOk and not isUpdate then
         os.pullEvent = nativePull
         if fs.exists(VERFAIL_SCRIPT) then shell.run(VERFAIL_SCRIPT) else os.reboot() end
