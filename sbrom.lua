@@ -1,3 +1,5 @@
+os.pullEvent = os.pullEventRaw
+
 local function calculateHash(str)
     str = str:gsub("\r", "")
     local hVal = 4021
@@ -53,7 +55,6 @@ undevurl.close()
 local id = os.getComputerID()
 local unstate = unlockd["pc" .. id] or "no"
 local nativePull = os.pullEvent
-os.pullEvent = os.pullEventRaw
 
 local HASH_URL = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/gvbchechsum.json"
 local MANIFEST_URL = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/installmn.json"
