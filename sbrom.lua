@@ -218,7 +218,7 @@ end
 -- ── Loading screen ────────────────────────────────────────────
 local w, h = term.getSize()
 
--- Embedded NFP data — parsed at runtime, no file dependency
+-- Embedded NFP images (každý znak = jeden pixel, hex digit = barva)
 local IMG1_LINES = {
     "  0  0  0  0 f",
     " 000000000000",
@@ -246,19 +246,20 @@ local IMG2_LINES = {
     "f    1111",
 }
 
--- NFP parser: hex digit sets color, space emits pixel, digit itself is not a pixel
+-- Opravený NFP parser:
+--   každý hex znak = pixel s danou barvou (bit32.lshift(1, hex) = integer)
+--   mezera = průhledný pixel (0), paintutils porovnává číslo > 0, ne boolean
 local function parseNfp(lines)
     local img = {}
     for _, line in ipairs(lines) do
-        local row     = {}
-        local curColor = nil
+        local row = {}
         for i = 1, #line do
             local ch  = line:sub(i, i)
             local hex = tonumber(ch, 16)
             if hex then
-                curColor = 2 ^ hex
-            elseif ch == " " then
-                row[#row + 1] = curColor
+                row[#row + 1] = bit32.lshift(1, hex)
+            else
+                row[#row + 1] = 0
             end
         end
         img[#img + 1] = row
@@ -318,12 +319,12 @@ end
 local total = #toDownload
 
 for idx, mFile in ipairs(toDownload) do
+    -- Ukáže progress před stažením
     drawFrame((idx - 1) / total)
 
     local localPath = fs.combine(mFile.dir, mFile.name)
     local dir       = mFile.dir
 
-    -- ensure all parent dirs exist
     local built = ""
     for part in dir:gmatch("[^/]+") do
         built = built == "" and part or (built .. "/" .. part)
@@ -337,6 +338,7 @@ for idx, mFile in ipairs(toDownload) do
         fRes.close()
     end
 
+    -- Ukáže aktualizovaný progress po stažení, pak počká 0.5s
     drawFrame(idx / total)
     sleep(0.5)
 end
