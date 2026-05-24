@@ -1,13 +1,64 @@
 os.pullEvent = os.pullEventRaw
 
-local function calculateHash(str)
-    str = str:gsub("\r", "")
-    local hVal = 4021
-    for i = 1, #str do
-        hVal = ((hVal * 33) + str:byte(i)) % 2^32
+local function sha256(msg)
+    local band, bxor, bor, bnot = bit32.band, bit32.bxor, bit32.bor, bit32.bnot
+    local rshift, lshift, rrotate = bit32.rshift, bit32.lshift, bit32.rrotate
+    local function badd(...)
+        local s = 0
+        for _, v in ipairs({...}) do s = band(s + v, 0xFFFFFFFF) end
+        return s
     end
-    return string.format("%08x", hVal)
+    local K = {
+        0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+        0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+        0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+        0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+        0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+        0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+        0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+        0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2,
+    }
+    local H = {
+        0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+        0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19,
+    }
+    local msgLen = #msg
+    msg = msg .. "\x80"
+    while #msg % 64 ~= 56 do msg = msg .. "\x00" end
+    local bitLen = msgLen * 8
+    for s = 56, 0, -8 do msg = msg .. string.char(band(rshift(bitLen, s), 0xFF)) end
+    for blk = 1, #msg, 64 do
+        local W = {}
+        for j = 1, 16 do
+            local o = blk + (j-1)*4
+            W[j] = bor(bor(bor(lshift(msg:byte(o),24),lshift(msg:byte(o+1),16)),lshift(msg:byte(o+2),8)),msg:byte(o+3))
+        end
+        for j = 17, 64 do
+            local s0 = bxor(bxor(rrotate(W[j-15],7),rrotate(W[j-15],18)),rshift(W[j-15],3))
+            local s1 = bxor(bxor(rrotate(W[j-2],17),rrotate(W[j-2],19)),rshift(W[j-2],10))
+            W[j] = badd(W[j-16], s0, W[j-7], s1)
+        end
+        local a,b,c,d,e,f,g,hh = H[1],H[2],H[3],H[4],H[5],H[6],H[7],H[8]
+        for j = 1, 64 do
+            local S1    = bxor(bxor(rrotate(e,6),rrotate(e,11)),rrotate(e,25))
+            local ch    = bxor(band(e,f),band(bnot(e),g))
+            local temp1 = badd(hh,S1,ch,K[j],W[j])
+            local S0    = bxor(bxor(rrotate(a,2),rrotate(a,13)),rrotate(a,22))
+            local maj   = bxor(bxor(band(a,b),band(a,c)),band(b,c))
+            local temp2 = badd(S0,maj)
+            hh=g; g=f; f=e; e=badd(d,temp1)
+            d=c; c=b; b=a; a=badd(temp1,temp2)
+        end
+        H[1]=badd(H[1],a); H[2]=badd(H[2],b); H[3]=badd(H[3],c); H[4]=badd(H[4],d)
+        H[5]=badd(H[5],e); H[6]=badd(H[6],f); H[7]=badd(H[7],g); H[8]=badd(H[8],hh)
+    end
+    local result = ""
+    for _, v in ipairs(H) do result = result .. string.format("%08x", v) end
+    return result
 end
+
+
+local calculateHash = sha256
 
 local function parseVersion(vStr)
     local parts = {}
@@ -32,7 +83,7 @@ end
 
 local socketPath = "/disk/sbrom.socket"
 local payloadPath = "/disk/payload.sbrom"
-local certHash = "5cd61823"
+local certHash = "46d19d6a9eeaf41ea7857b38df44d5fabd513edf3abda12a64db7b151c9fdbdd"
 
 if fs.exists(socketPath) then
     local f = fs.open(socketPath, "r")
@@ -119,9 +170,64 @@ mRes.close()
 
 -- Loading screen setup
 local w, h = term.getSize()
+local IMG1_DATA = {
+    "  0  0  0  0 f",
+    " 000000000000",
+    "00          00",
+    " 0          0",
+    "00  000000  00",
+    " 0  0eeee0  0",
+    "00  000000  00",
+    " 0          0",
+    "00          00",
+    " 000000000000",
+    "f 0  0  0  0",
+}
+
+local IMG2_DATA = {
+    "     1111   f",
+    "     1111",
+    "     1111",
+    "     1111",
+    "     1111",
+    "     1111",
+    "  1111111111",
+    "  1111111111",
+    "   11111111",
+    "    111111",
+    "f    1111",
+}
+
+local function parseNfp(data)
+    local img = {}
+    for _, line in ipairs(data) do
+        local row = {}
+        local bgColor = nil
+        local i = 1
+        while i <= #line do
+            local ch = line:sub(i, i)
+            if ch == " " then
+                row[#row+1] = bgColor
+                i = i + 1
+            else
+                local colorHex = tonumber(ch, 16)
+                if colorHex then
+                    bgColor = 2 ^ colorHex
+                    i = i + 1
+                else
+                    row[#row+1] = bgColor
+                    i = i + 1
+                end
+            end
+        end
+        img[#img+1] = row
+    end
+    return img
+end
+
 local images = {
-    paintutils.loadImage("update1.nfp"),
-    paintutils.loadImage("update2.nfp"),
+    parseNfp(IMG1_DATA),
+    parseNfp(IMG2_DATA),
 }
 local labelText = "Instalace aktualizace systemu"
 local barWidth = 20
@@ -130,7 +236,7 @@ local barY = h - 1
 
 local imgW = 0
 for _, row in ipairs(images[1]) do
-   if #row > imgW then imgW = #row end
+    if #row > imgW then imgW = #row end
 end
 local imgH = #images[1]
 local imgX = math.floor((w - imgW) / 2) + 1
@@ -230,7 +336,55 @@ if isUpdate or not integrityOk then
 
     if not integrityOk and not isUpdate then
         os.pullEvent = nativePull
-        if fs.exists(VERFAIL_SCRIPT) then shell.run(VERFAIL_SCRIPT) else os.reboot() end
+
+        local verfailOk = false
+
+        if fs.exists(VERFAIL_SCRIPT) then
+            local hRes2 = http.get(HASH_URL)
+            if hRes2 then
+                local remoteHashes = textutils.unserializeJSON(hRes2.readAll())
+                hRes2.close()
+                if type(remoteHashes) == "table" then
+                    local expectedHash = remoteHashes["fw/warn/verfail.lua"]
+                        or remoteHashes["/fw/warn/verfail.lua"]
+                    if expectedHash then
+                        local vf = fs.open(VERFAIL_SCRIPT, "r")
+                        if vf then
+                            local vContent = vf.readAll() or ""
+                            vf.close()
+                            if calculateHash(vContent) == expectedHash then
+                                verfailOk = true
+                            end
+                        end
+                    else
+                        verfailOk = true
+                    end
+                end
+            else
+                verfailOk = true
+            end
+        end
+
+        local function inlineFallback(reason)
+            term.setBackgroundColor(colors.black)
+            term.setTextColor(colors.red)
+            term.clear()
+            term.setCursorPos(1, 1)
+            print("INTEGRITY FAIL")
+            term.setTextColor(colors.white)
+            print(reason)
+            print("wiki.gghjk.net/cs/gvb/5004")
+            while true do os.pullEventRaw() end
+        end
+
+        if not verfailOk then
+            inlineFallback("verfail.lua is missing or corrupt.")
+        else
+            local ok2, runErr = pcall(shell.run, VERFAIL_SCRIPT)
+            if not ok2 then
+                inlineFallback("verfail.lua crashed: " .. tostring(runErr):sub(1, 38))
+            end
+        end
         return
     end
     os.reboot()
