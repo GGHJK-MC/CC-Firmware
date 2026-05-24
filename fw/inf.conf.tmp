@@ -5,7 +5,7 @@
   pwontr = false,
   boottimeout = 2,
   fwrd = "05/24/2026",
-  version = "19.10",
+  version = "19.11",
   secureboot = false,
   bootorder = {
     {

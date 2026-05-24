@@ -10,7 +10,9 @@ local w, h = term.getSize()
 
 term.setBackgroundColor(colors.black)
 term.clear()
-
+local initbootd = fs.open("/init_boot", "w")
+initbootd.write("file for computer to boot")
+initbootd.close()
 local f = nOpen("/fw/assets/err.nfp", "r")
 if f then
     local ok, img = pcall(paintutils.parseImage, f.readAll()); f.close()

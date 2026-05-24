@@ -88,7 +88,7 @@ local defaults = {
     swpass      = "fallback",
     secureboot  = false,
     pwontr      = false,
-    version     = "19.10",
+    version     = "19.11",
     fwrd        = "05/24/2026",
     bootorder   = { { name="GGHJK OS", path="/init_boot" } },
     boottimeout = 2,
@@ -148,13 +148,9 @@ end
 local _saveOk  = true
 local _saveErr = ""
 
-local _rawFsOpen   = fs.open
-local _rawFsDelete = fs.delete
-local _rawFsMove   = fs.move
-
 local function readConfigFile(path)
     if not fs.exists(path) then return nil end
-    local f = _rawFsOpen(path, "r"); if not f then return nil end
+    local f = nOpen(path, "r"); if not f then return nil end
     local content = f.readAll(); f.close()
     if not content or content == "" then return nil end
     local ok, decoded = pcall(textutils.unserialize, content)
@@ -165,16 +161,13 @@ end
 local function saveConfig()
     local ok, data = pcall(textutils.serialize, config)
     if not ok or not data then _saveOk=false; _saveErr="serialize failed"; return false end
-    local tf = _rawFsOpen(tmp_path, "w"); if not tf then _saveOk=false; _saveErr="tmp open failed"; return false end
+    local tf = nOpen(tmp_path, "w"); if not tf then _saveOk=false; _saveErr="tmp open failed"; return false end
     local wok = pcall(function() tf.write(data) end); tf.close()
     if not wok then _saveOk=false; _saveErr="tmp write failed"; return false end
     if not readConfigFile(tmp_path) then _saveOk=false; _saveErr="tmp verify failed"; return false end
-    if fs.exists(inf_path) then
-        local dok = pcall(_rawFsDelete, inf_path)
-        if not dok then _saveOk=false; _saveErr="delete old failed"; return false end
-    end
-    local mok = pcall(_rawFsMove, tmp_path, inf_path)
-    if not mok then _saveOk=false; _saveErr="move failed"; return false end
+    local of = nOpen(inf_path, "w"); if not of then _saveOk=false; _saveErr="main open failed"; return false end
+    local mok = pcall(function() of.write(data) end); of.close()
+    if not mok then _saveOk=false; _saveErr="main write failed"; return false end
     _saveOk=true; _saveErr=""; return true
 end
 
@@ -624,12 +617,12 @@ function DrawExit()
     local t = theme()
     sectionTitle(1, "Exit Options")
     local opts = {
-        { vy=3,  label="Continue Boot",           desc="Resume normal boot sequence",  bg=t.header      },
-        { vy=5,  label="Save All",                desc="Write all changes to disk",    bg=colors.green  },
-        { vy=7,  label="Install latest GGHJK OS", desc="Download and install GGHJK OS",bg=colors.blue   },
-        { vy=9,  label="Open Shell",              desc="Drop to CraftOS shell",        bg=colors.gray   },
-        { vy=11, label="Reboot System",           desc="Restart the computer",         bg=colors.gray   },
-        { vy=13, label="Power Off",               desc="Shut down the computer",       bg=colors.gray   },
+        { vy=3,  label="Continue Boot",           desc="Resume normal boot sequence",   bg=t.header     },
+        { vy=5,  label="Save All",                desc="Write all changes to disk",     bg=colors.green },
+        { vy=7,  label="Install latest GGHJK OS", desc="Download and install GGHJK OS", bg=colors.blue  },
+        { vy=9,  label="Open Shell",              desc="Drop to CraftOS shell",         bg=colors.gray  },
+        { vy=11, label="Reboot System",           desc="Restart the computer",          bg=colors.gray  },
+        { vy=13, label="Power Off",               desc="Shut down the computer",        bg=colors.gray  },
     }
     for _, opt in ipairs(opts) do
         local sy = vToS(opt.vy)
@@ -1012,7 +1005,7 @@ fs.makeDir = function(p)       if isFW(p) then error("Access Denied",2) end; ret
 fs.move    = function(f, t2)   if isFW(f) or isFW(t2) then error("Access Denied",2) end; return _realMove(f, t2) end
 fs.copy    = function(f, t2)   if isFW(t2) then error("Access Denied",2) end; return _realCopy(f, t2) end
 
-nOpen = nil; nDelete = nil; nMakeDir = nil
+nDelete = nil; nMakeDir = nil
 
 term.setBackgroundColor(colors.black); term.clear(); term.setCursorPos(1,1)
 
