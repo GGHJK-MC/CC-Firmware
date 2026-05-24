@@ -99,19 +99,18 @@ local undevurl = http.get("https://raw.githubusercontent.com/GGHJK-MC/CC-Firmwar
 if not undevurl then return end
 local unlockd = textutils.unserializeJSON(undevurl.readAll())
 undevurl.close()
-local id       = os.getComputerID()
-local unstate  = unlockd["pc" .. id] or "no"
+local id         = os.getComputerID()
+local unstate    = unlockd["pc" .. id] or "no"
 local nativePull = os.pullEvent
 
-local MANIFEST_URL  = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/installmn.json"
-local VERSION_URL   = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/ver.txt"
-local FWRD_URL      = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/fwrd.txt"
-local HASH_URL      = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/gvbchechsum.json"
-local INF_PATH      = "/fw/inf.conf"
-local PRELOADER     = "/fw/preloader.autorun"
+local MANIFEST_URL   = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/installmn.json"
+local VERSION_URL    = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/ver.txt"
+local FWRD_URL       = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/fwrd.txt"
+local HASH_URL       = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/gvbchechsum.json"
+local INF_PATH       = "/fw/inf.conf"
+local PRELOADER      = "/fw/preloader.autorun"
 local VERFAIL_SCRIPT = "/fw/warn/verfail.lua"
 
--- ── Config ────────────────────────────────────────────────────────────────────
 local function loadConfig()
     if not fs.exists(INF_PATH) then return { version = "0" } end
     local f = fs.open(INF_PATH, "r")
@@ -121,7 +120,6 @@ local function loadConfig()
     return type(data) == "table" and data or { version = "0" }
 end
 
--- Bootstrap inf.conf if missing
 if not fs.exists(INF_PATH) then
     if not fs.exists("/fw") then fs.makeDir("/fw") end
     local r = http.get("https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/fw/inf.conf")
@@ -135,37 +133,26 @@ end
 local config       = loadConfig()
 local localVersion = tostring(config.version or "0")
 
--- ── Version check ─────────────────────────────────────────────────────────────
 local vRes          = http.get(VERSION_URL)
 local remoteVersion = vRes and vRes.readAll():gsub("%s+", "") or nil
 if vRes then vRes.close() end
 
-local isUpdate        = false
-local needsDownload   = false   -- true if ANY file is missing/corrupt
+local isUpdate      = false
+local needsDownload = false
 
 if remoteVersion and isNewerVersion(remoteVersion, localVersion) then
     isUpdate      = true
     needsDownload = true
-    -- wipe /fw except inf.conf
     if fs.exists("/fw") then
         for _, file in ipairs(fs.list("/fw")) do
             if file ~= "inf.conf" then
-                local p = fs.combine("/fw", file)
-                if fs.isDir(p) then
-                    -- recurse not needed; let manifest re-download
-                    fs.delete(p)
-                else
-                    fs.delete(p)
-                end
+                fs.delete(fs.combine("/fw", file))
             end
         end
     end
 elseif remoteVersion then
-    -- Same version — check if ALL manifest files are actually present & intact
-    -- We'll verify after fetching the manifest below; for now flag for check
     needsDownload = false
 else
-    -- No internet — skip to preloader if it exists, else halt
     os.pullEvent = nativePull
     if fs.exists(PRELOADER) then
         shell.run(PRELOADER)
@@ -181,7 +168,6 @@ else
     return
 end
 
--- ── Manifest ──────────────────────────────────────────────────────────────────
 local mRes = http.get(MANIFEST_URL)
 if not mRes then
     os.pullEvent = nativePull
@@ -196,14 +182,12 @@ if type(manifest) ~= "table" then
     return
 end
 
--- ── Check which files actually need downloading ───────────────────────────────
-local toDownload = {}
+local toDownload  = {}
 local integrityOk = true
 
 for _, mFile in ipairs(manifest) do
-    local localPath  = fs.combine(mFile.dir, mFile.name)
-    local needThis   = false
-
+    local localPath = fs.combine(mFile.dir, mFile.name)
+    local needThis  = false
     if not fs.exists(localPath) then
         needThis      = true
         needsDownload = true
@@ -214,9 +198,7 @@ for _, mFile in ipairs(manifest) do
             f.close()
             if calculateHash(content) ~= mFile.hash then
                 needThis = true
-                if not isUpdate then
-                    integrityOk = false
-                end
+                if not isUpdate then integrityOk = false end
                 needsDownload = true
             end
         else
@@ -224,45 +206,76 @@ for _, mFile in ipairs(manifest) do
             needsDownload = true
         end
     end
-
-    if needThis then
-        table.insert(toDownload, mFile)
-    end
+    if needThis then table.insert(toDownload, mFile) end
 end
 
--- ── Skip loading screen entirely if nothing to download ───────────────────────
 if not needsDownload then
     os.pullEvent = nativePull
     shell.run(PRELOADER)
     return
 end
 
--- ── Loading screen ────────────────────────────────────────────────────────────
+-- ── Loading screen ────────────────────────────────────────────
 local w, h = term.getSize()
 
--- NFP image data embedded as strings (avoids file dependency)
-local function loadNfp(path)
-    local f = fs.open(path, "r")
-    if not f then return nil end
-    local ok, img = pcall(paintutils.parseImage, f.readAll())
-    f.close()
-    return (ok and img and #img > 0) and img or nil
+-- Embedded NFP data — parsed at runtime, no file dependency
+local IMG1_LINES = {
+    "  0  0  0  0 f",
+    " 000000000000",
+    "00          00",
+    " 0          0",
+    "00  000000  00",
+    " 0  0eeee0  0",
+    "00  000000  00",
+    " 0          0",
+    "00          00",
+    " 000000000000",
+    "f 0  0  0  0",
+}
+local IMG2_LINES = {
+    "     1111   f",
+    "     1111",
+    "     1111",
+    "     1111",
+    "     1111",
+    "     1111",
+    "  1111111111",
+    "  1111111111",
+    "   11111111",
+    "    111111",
+    "f    1111",
+}
+
+-- NFP parser: hex digit sets color, space emits pixel, digit itself is not a pixel
+local function parseNfp(lines)
+    local img = {}
+    for _, line in ipairs(lines) do
+        local row     = {}
+        local curColor = nil
+        for i = 1, #line do
+            local ch  = line:sub(i, i)
+            local hex = tonumber(ch, 16)
+            if hex then
+                curColor = 2 ^ hex
+            elseif ch == " " then
+                row[#row + 1] = curColor
+            end
+        end
+        img[#img + 1] = row
+    end
+    return img
 end
 
 local images = {
-    loadNfp("update1.nfp"),
-    loadNfp("update2.nfp"),
+    parseNfp(IMG1_LINES),
+    parseNfp(IMG2_LINES),
 }
-for _j = 1, 2 do
-    if not images[_j] then images[_j] = {{colors.black}} end
-end
 
 local labelText = "Instalace aktualizace systemu"
 local barWidth  = 20
 local barX      = math.floor((w - barWidth) / 2) + 1
 local barY      = h - 1
 
--- Measure first image dimensions
 local imgW = 0
 for _, row in ipairs(images[1]) do
     if #row > imgW then imgW = #row end
@@ -273,7 +286,7 @@ local imgY  = math.floor((h - imgH - 4) / 2) + 1
 local textX = math.floor((w - #labelText) / 2) + 1
 local textY = imgY + imgH + 1
 
-local frameIdx     = 1
+local frameIdx      = 1
 local lastFrameTime = os.clock()
 
 local function drawBar(progress)
@@ -301,7 +314,7 @@ local function drawFrame(progress)
     drawBar(progress)
 end
 
--- ── Download only what's needed ───────────────────────────────────────────────
+-- ── Download ──────────────────────────────────────────────────
 local total = #toDownload
 
 for idx, mFile in ipairs(toDownload) do
@@ -310,13 +323,9 @@ for idx, mFile in ipairs(toDownload) do
     local localPath = fs.combine(mFile.dir, mFile.name)
     local dir       = mFile.dir
 
-    if not fs.exists(dir) then fs.makeDir(dir) end
-
-    -- Create parent subdirs if needed (e.g. fw/warn/)
-    local parts = {}
-    for part in dir:gmatch("[^/]+") do parts[#parts+1] = part end
+    -- ensure all parent dirs exist
     local built = ""
-    for _, part in ipairs(parts) do
+    for part in dir:gmatch("[^/]+") do
         built = built == "" and part or (built .. "/" .. part)
         if not fs.exists(built) then fs.makeDir(built) end
     end
@@ -324,37 +333,28 @@ for idx, mFile in ipairs(toDownload) do
     local fRes = http.get(mFile.url)
     if fRes then
         local f = fs.open(localPath, "w")
-        if f then
-            f.write(fRes.readAll())
-            f.close()
-        end
+        if f then f.write(fRes.readAll()); f.close() end
         fRes.close()
     end
 
     drawFrame(idx / total)
+    sleep(0.5)
 end
 
--- ── Post-download: update inf.conf if this was an update ─────────────────────
+-- ── Post-download ─────────────────────────────────────────────
 if isUpdate or not integrityOk then
     local fwrdVal = "none"
     local fwrRes  = http.get(FWRD_URL)
-    if fwrRes then
-        fwrdVal = fwrRes.readAll():gsub("%s+", "")
-        fwrRes.close()
-    end
+    if fwrRes then fwrdVal = fwrRes.readAll():gsub("%s+", ""); fwrRes.close() end
 
     config.version = remoteVersion or config.version
     config.fwrd    = fwrdVal
 
     local f = fs.open(INF_PATH, "w")
-    if f then
-        f.write(textutils.serialize(config))
-        f.close()
-    end
+    if f then f.write(textutils.serialize(config)); f.close() end
 
     if not integrityOk and not isUpdate then
         os.pullEvent = nativePull
-
         local verfailOk = false
         if fs.exists(VERFAIL_SCRIPT) then
             local hRes2 = http.get(HASH_URL)
@@ -367,8 +367,7 @@ if isUpdate or not integrityOk then
                     if expectedHash then
                         local vf = fs.open(VERFAIL_SCRIPT, "r")
                         if vf then
-                            local vContent = vf.readAll() or ""
-                            vf.close()
+                            local vContent = vf.readAll() or ""; vf.close()
                             verfailOk = calculateHash(vContent) == expectedHash
                         end
                     else
@@ -383,8 +382,7 @@ if isUpdate or not integrityOk then
         local function inlineFallback(reason)
             term.setBackgroundColor(colors.black)
             term.setTextColor(colors.red)
-            term.clear()
-            term.setCursorPos(1, 1)
+            term.clear(); term.setCursorPos(1, 1)
             print("INTEGRITY FAIL")
             term.setTextColor(colors.white)
             print(reason)
