@@ -1,80 +1,163 @@
-local VERSION_URL = "https://raw.githubusercontent.com/MC-GGHJK/gghjk-firmware-versions/main/versions/versions.txt"
-
-local startArg = arg and arg[1]
-
-local nOpen = fs.open
-local nDelete = fs.delete
-local nMakeDir = fs.makeDir
-local nMove = fs.move
+local nOpen=fs.open
+local nDelete=fs.delete
+local nMakeDir=fs.makeDir
+local nMove=fs.move
+local nCopy=fs.copy
 
 local function isProtected(p)
     if not p then return false end
-    local path = fs.combine("/", p):lower()
-    return path == "fw" or path:sub(1,3) == "fw/" or path == "rom/autorun/sbrom.lua"
+    local ps=tostring(p)
+    if ps:find("%.%.") then return true end
+    local path=fs.combine("/",ps):lower()
+    return path=="fw"
+        or path=="fw/"
+        or path:sub(1,3)=="fw/"
+        or path=="rom/autorun/sbrom.lua"
+        or path=="rom/autorun"
 end
 
-fs.delete = function(p)
-    if isProtected(p) then error("Access Denied", 2) end
+fs.open=function(p,m)
+    if isProtected(p) and (m=="w" or m=="a") then
+        return nil,"Access Denied"
+    end
+    return nOpen(p,m)
+end
+
+fs.delete=function(p)
+    if isProtected(p) then
+        error("Access Denied",2)
+    end
     return nDelete(p)
 end
 
-fs.open = function(p, m)
+fs.makeDir=function(p)
     if isProtected(p) then
-        return nil, "Access Denied"
+        error("Access Denied",2)
     end
-    return nOpen(p, m)
-end
-
-fs.makeDir = function(p)
-    if isProtected(p) then error("Access Denied", 2) end
     return nMakeDir(p)
 end
 
-fs.move = function(f, t)
-    if isProtected(f) or isProtected(t) then error("Access Denied", 2) end
-    return nMove(f, t)
-end
-local function protectCtrlT()
-    local oldPullEvent = os.pullEventRaw
-    os.pullEvent = function()
-        return oldPullEvent()
+fs.move=function(f,t)
+    if isProtected(f) or isProtected(t) then
+        error("Access Denied",2)
     end
+    return nMove(f,t)
 end
 
-
-local function Waiting(text,y)
-    for i=1,6 do
-        term.setCursorPos(1,y)
-        term.write("[")
-        term.setTextColor(colors.red)
-        term.write(i%2==0 and " ***" or "*** ")
-        term.setTextColor(colors.white)
-        term.write("] "..text)
-        sleep(0.5)
+fs.copy=function(f,t)
+    if isProtected(t) then
+        error("Access Denied",2)
     end
-    term.setCursorPos(1,y)
-    term.write("[ ")
-    term.setTextColor(colors.green)
-    term.write("OK ")
-    term.setTextColor(colors.white)
-    term.write("] "..text)
+    return nCopy(f,t)
 end
-if fs.exists("/fw/fw.lua") then
-    local f = nOpen("/fw/fw.lua","r")
-    local content = f.readAll()
+
+local _rawPull=os.pullEventRaw
+
+os.pullEvent=function(filter)
+    local ev={_rawPull(filter)}
+    if ev[1]=="terminate" then
+        return os.pullEvent(filter)
+    end
+    return table.unpack(ev)
+end
+
+local inf_path="/fw/inf.conf"
+local tmp_path="/fw/inf.conf.tmp"
+
+local function setRebooted()
+    if not fs.exists(inf_path) then
+        return
+    end
+
+    local f=nOpen(inf_path,"r")
+    if not f then
+        return
+    end
+
+    local content=f.readAll()
     f.close()
-    local fn, err = load(content,"fw","t",_ENV)
-    if fn then
-        fn()
-    else
-        error("Failed to load FW: "..err)
+
+    if not content or #content>8192 then
+        return
     end
-else
+
+    local ok,cfg=pcall(textutils.unserialize,content)
+
+    if not ok or type(cfg)~="table" then
+        return
+    end
+
+    cfg.rebooted=true
+
+    local ser=textutils.serialize(cfg)
+
+    local tf=nOpen(tmp_path,"w")
+    if not tf then
+        return
+    end
+
+    local wok=pcall(function()
+        tf.write(ser)
+    end)
+
+    tf.close()
+
+    if not wok then
+        return
+    end
+
+    local vf=nOpen(tmp_path,"r")
+    if not vf then
+        return
+    end
+
+    local written=vf.readAll()
+    vf.close()
+
+    local ok2,dec=pcall(textutils.unserialize,written)
+
+    if not ok2 or type(dec)~="table" then
+        return
+    end
+
+    local rf=nOpen(inf_path,"w")
+
+    if rf then
+        rf.write(written)
+        rf.close()
+    end
+end
+
+setRebooted()
+
+local function fatal(msg)
     term.setBackgroundColor(colors.black)
     term.clear()
     term.setCursorPos(1,1)
     term.setTextColor(colors.red)
-    print("Critical Error: /fw/fw.lua not found!")
-    sleep(0.1)
+    print("[GGHJK UEFI] "..msg)
+    os.startTimer(5)
+    os.pullEventRaw("timer")
     os.reboot()
+end
+
+if not fs.exists("/fw/fw.lua") then
+    fatal("Critical: /fw/fw.lua not found!")
+end
+
+local f=nOpen("/fw/fw.lua","r")
+
+if not f then
+    fatal("Critical: cannot open /fw/fw.lua")
+end
+
+local content=f.readAll()
+f.close()
+
+local fn,err=load(content,"fw","t",_ENV)
+
+if fn then
+    fn()
+else
+    fatal("Critical: parse error in /fw/fw.lua\n"..tostring(err))
 end
