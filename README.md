@@ -1,5 +1,7 @@
 # Computer Craft Firmware
 
-## AVAST HÁZÍ SALÁM PO GND
+## CC:T Firmware for GGHJK Server
 
-## ATM JE OTRAVNEJ
+- Secure
+- Fast
+- Frequently updated
