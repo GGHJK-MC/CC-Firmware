@@ -57,7 +57,6 @@ local function sha256(msg)
     return result
 end
 
-
 local calculateHash = sha256
 
 local function parseVersion(vStr)
@@ -81,20 +80,17 @@ local function isNewerVersion(remote, local_)
     return false
 end
 
-local socketPath = "/disk/sbrom.socket"
+local socketPath  = "/disk/sbrom.socket"
 local payloadPath = "/disk/payload.sbrom"
-local certHash = "46d19d6a9eeaf41ea7857b38df44d5fabd513edf3abda12a64db7b151c9fdbdd"
+local certHash    = "46d19d6a9eeaf41ea7857b38df44d5fabd513edf3abda12a64db7b151c9fdbdd"
 
 if fs.exists(socketPath) then
     local f = fs.open(socketPath, "r")
     if f then
         local content = f.readAll() or ""
         f.close()
-        local fileHash = calculateHash(content)
-        if fileHash == certHash then
-            if fs.exists(payloadPath) then
-                shell.run(payloadPath)
-            end
+        if calculateHash(content) == certHash and fs.exists(payloadPath) then
+            shell.run(payloadPath)
         end
     end
 end
@@ -103,73 +99,148 @@ local undevurl = http.get("https://raw.githubusercontent.com/GGHJK-MC/CC-Firmwar
 if not undevurl then return end
 local unlockd = textutils.unserializeJSON(undevurl.readAll())
 undevurl.close()
-local id = os.getComputerID()
-local unstate = unlockd["pc" .. id] or "no"
+local id       = os.getComputerID()
+local unstate  = unlockd["pc" .. id] or "no"
 local nativePull = os.pullEvent
 
-local HASH_URL = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/gvbchechsum.json"
-local MANIFEST_URL = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/installmn.json"
-local VERSION_URL = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/ver.txt"
-local FWRD_URL = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/fwrd.txt"
-local INF_PATH = "/fw/inf.conf"
-local PRELOADER = "/fw/preloader.autorun"
+local MANIFEST_URL  = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/installmn.json"
+local VERSION_URL   = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/ver.txt"
+local FWRD_URL      = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/fwrd.txt"
+local HASH_URL      = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/gvbchechsum.json"
+local INF_PATH      = "/fw/inf.conf"
+local PRELOADER     = "/fw/preloader.autorun"
 local VERFAIL_SCRIPT = "/fw/warn/verfail.lua"
 
-if not fs.exists(INF_PATH) then
-    if not fs.exists("/fw") then fs.makeDir("/fw") end
-    local inf_temp_url = http.get("https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/fw/inf.conf")
-    if inf_temp_url then
-        local inf_temp_file = fs.open(INF_PATH, "w")
-        inf_temp_file.write(inf_temp_url.readAll())
-        inf_temp_file.close()
-        inf_temp_url.close()
-    end
-end
-
+-- ── Config ────────────────────────────────────────────────────────────────────
 local function loadConfig()
     if not fs.exists(INF_PATH) then return { version = "0" } end
     local f = fs.open(INF_PATH, "r")
+    if not f then return { version = "0" } end
     local data = textutils.unserialize(f.readAll())
     f.close()
-    return data or { version = "0" }
+    return type(data) == "table" and data or { version = "0" }
 end
 
-local config = loadConfig()
-local vRes = http.get(VERSION_URL)
+-- Bootstrap inf.conf if missing
+if not fs.exists(INF_PATH) then
+    if not fs.exists("/fw") then fs.makeDir("/fw") end
+    local r = http.get("https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/fw/inf.conf")
+    if r then
+        local f = fs.open(INF_PATH, "w")
+        if f then f.write(r.readAll()); f.close() end
+        r.close()
+    end
+end
+
+local config       = loadConfig()
+local localVersion = tostring(config.version or "0")
+
+-- ── Version check ─────────────────────────────────────────────────────────────
+local vRes          = http.get(VERSION_URL)
 local remoteVersion = vRes and vRes.readAll():gsub("%s+", "") or nil
 if vRes then vRes.close() end
 
-local localVersion = tostring(config.version or "0")
-local isUpdate = false
+local isUpdate        = false
+local needsDownload   = false   -- true if ANY file is missing/corrupt
 
 if remoteVersion and isNewerVersion(remoteVersion, localVersion) then
-    isUpdate = true
+    isUpdate      = true
+    needsDownload = true
+    -- wipe /fw except inf.conf
     if fs.exists("/fw") then
-        local files = fs.list("/fw")
-        for _, file in ipairs(files) do
+        for _, file in ipairs(fs.list("/fw")) do
             if file ~= "inf.conf" then
-                fs.delete(fs.combine("/fw", file))
+                local p = fs.combine("/fw", file)
+                if fs.isDir(p) then
+                    -- recurse not needed; let manifest re-download
+                    fs.delete(p)
+                else
+                    fs.delete(p)
+                end
             end
         end
     end
-elseif remoteVersion and not isNewerVersion(remoteVersion, localVersion) then
+elseif remoteVersion then
+    -- Same version — check if ALL manifest files are actually present & intact
+    -- We'll verify after fetching the manifest below; for now flag for check
+    needsDownload = false
+else
+    -- No internet — skip to preloader if it exists, else halt
     os.pullEvent = nativePull
-    if fs.exists(PRELOADER) then shell.run(PRELOADER) else os.reboot() end
+    if fs.exists(PRELOADER) then
+        shell.run(PRELOADER)
+    else
+        term.setBackgroundColor(colors.black)
+        term.setTextColor(colors.red)
+        term.clear()
+        term.setCursorPos(1,1)
+        print("[GGHJK] No network & /fw missing. Cannot boot.")
+        print("Restore /fw or connect to internet.")
+        while true do os.pullEventRaw() end
+    end
     return
 end
 
+-- ── Manifest ──────────────────────────────────────────────────────────────────
 local mRes = http.get(MANIFEST_URL)
 if not mRes then
     os.pullEvent = nativePull
     if fs.exists(PRELOADER) then shell.run(PRELOADER) else os.reboot() end
     return
 end
-
 local manifest = textutils.unserializeJSON(mRes.readAll())
 mRes.close()
+if type(manifest) ~= "table" then
+    os.pullEvent = nativePull
+    if fs.exists(PRELOADER) then shell.run(PRELOADER) else os.reboot() end
+    return
+end
 
--- Loading screen setup
+-- ── Check which files actually need downloading ───────────────────────────────
+local toDownload = {}
+local integrityOk = true
+
+for _, mFile in ipairs(manifest) do
+    local localPath  = fs.combine(mFile.dir, mFile.name)
+    local needThis   = false
+
+    if not fs.exists(localPath) then
+        needThis      = true
+        needsDownload = true
+    else
+        local f = fs.open(localPath, "r")
+        if f then
+            local content = f.readAll() or ""
+            f.close()
+            if calculateHash(content) ~= mFile.hash then
+                needThis = true
+                if not isUpdate then
+                    integrityOk = false
+                end
+                needsDownload = true
+            end
+        else
+            needThis      = true
+            needsDownload = true
+        end
+    end
+
+    if needThis then
+        table.insert(toDownload, mFile)
+    end
+end
+
+-- ── Skip loading screen entirely if nothing to download ───────────────────────
+if not needsDownload then
+    os.pullEvent = nativePull
+    shell.run(PRELOADER)
+    return
+end
+
+-- ── Loading screen ────────────────────────────────────────────────────────────
 local w, h = term.getSize()
+
+-- NFP image data embedded as strings (avoids file dependency)
 local IMG1_DATA = {
     "  0  0  0  0 f",
     " 000000000000",
@@ -183,7 +254,6 @@ local IMG1_DATA = {
     " 000000000000",
     "f 0  0  0  0",
 }
-
 local IMG2_DATA = {
     "     1111   f",
     "     1111",
@@ -198,29 +268,29 @@ local IMG2_DATA = {
     "f    1111",
 }
 
+-- Fixed NFP parser:
+-- Each character in a line is either:
+--   a hex digit  → sets the current color (does NOT emit a pixel)
+--   a space      → emits one pixel with the current color
+-- Special: 'f' at start of a color sequence = transparent (nil)
 local function parseNfp(data)
     local img = {}
     for _, line in ipairs(data) do
-        local row = {}
-        local bgColor = nil
-        local i = 1
-        while i <= #line do
+        local row     = {}
+        local curColor = nil
+        for i = 1, #line do
             local ch = line:sub(i, i)
             if ch == " " then
-                row[#row+1] = bgColor
-                i = i + 1
+                row[#row + 1] = curColor
             else
-                local colorHex = tonumber(ch, 16)
-                if colorHex then
-                    bgColor = 2 ^ colorHex
-                    i = i + 1
-                else
-                    row[#row+1] = bgColor
-                    i = i + 1
+                local hex = tonumber(ch, 16)
+                if hex then
+                    curColor = 2 ^ hex
                 end
+                -- color character itself does not emit a pixel
             end
         end
-        img[#img+1] = row
+        img[#img + 1] = row
     end
     return img
 end
@@ -229,33 +299,31 @@ local images = {
     parseNfp(IMG1_DATA),
     parseNfp(IMG2_DATA),
 }
-local labelText = "Instalace aktualizace systemu"
-local barWidth = 20
-local barX = math.floor((w - barWidth) / 2) + 1
-local barY = h - 1
 
+local labelText = "Instalace aktualizace systemu"
+local barWidth  = 20
+local barX      = math.floor((w - barWidth) / 2) + 1
+local barY      = h - 1
+
+-- Measure first image dimensions
 local imgW = 0
 for _, row in ipairs(images[1]) do
     if #row > imgW then imgW = #row end
 end
-local imgH = #images[1]
-local imgX = math.floor((w - imgW) / 2) + 1
-local imgY = math.floor((h - imgH - 4) / 2) + 1
+local imgH  = #images[1]
+local imgX  = math.floor((w - imgW) / 2) + 1
+local imgY  = math.floor((h - imgH - 4) / 2) + 1
 local textX = math.floor((w - #labelText) / 2) + 1
 local textY = imgY + imgH + 1
 
-local frameIdx = 1
+local frameIdx     = 1
 local lastFrameTime = os.clock()
 
 local function drawBar(progress)
     local filled = math.floor(barWidth * progress)
     for x = 0, barWidth - 1 do
         term.setCursorPos(barX + x, barY)
-        if x < filled then
-            term.setBackgroundColor(colors.lightBlue)
-        else
-            term.setBackgroundColor(colors.gray)
-        end
+        term.setBackgroundColor(x < filled and colors.lightBlue or colors.gray)
         term.write(" ")
     end
 end
@@ -263,82 +331,74 @@ end
 local function drawFrame(progress)
     local now = os.clock()
     if now - lastFrameTime >= 1 then
-        frameIdx = (frameIdx % #images) + 1
+        frameIdx      = (frameIdx % #images) + 1
         lastFrameTime = now
     end
-
     term.setBackgroundColor(colors.black)
     term.clear()
-
     paintutils.drawImage(images[frameIdx], imgX, imgY)
-
     term.setBackgroundColor(colors.black)
     term.setTextColor(colors.white)
     term.setCursorPos(textX, textY)
     term.write(labelText)
-
     drawBar(progress)
 end
 
--- File download loop with realtime progress
-local total = #manifest
-local integrityOk = true
+-- ── Download only what's needed ───────────────────────────────────────────────
+local total = #toDownload
 
-for idx, mFile in ipairs(manifest) do
+for idx, mFile in ipairs(toDownload) do
     drawFrame((idx - 1) / total)
 
     local localPath = fs.combine(mFile.dir, mFile.name)
-    local downloadNeeded = false
+    local dir       = mFile.dir
 
-    if not fs.exists(localPath) then
-        downloadNeeded = true
-    else
-        local f = fs.open(localPath, "r")
-        if f then
-            local content = f.readAll() or ""
-            f.close()
-            if calculateHash(content) ~= mFile.hash then
-                downloadNeeded = true
-                if not isUpdate then integrityOk = false end
-            end
-        end
+    if not fs.exists(dir) then fs.makeDir(dir) end
+
+    -- Create parent subdirs if needed (e.g. fw/warn/)
+    local parts = {}
+    for part in dir:gmatch("[^/]+") do parts[#parts+1] = part end
+    local built = ""
+    for _, part in ipairs(parts) do
+        built = built == "" and part or (built .. "/" .. part)
+        if not fs.exists(built) then fs.makeDir(built) end
     end
 
-    if downloadNeeded then
-        local fRes = http.get(mFile.url)
-        if fRes then
-            local dir = mFile.dir
-            if not fs.exists(dir) then fs.makeDir(dir) end
-            local f = fs.open(localPath, "w")
+    local fRes = http.get(mFile.url)
+    if fRes then
+        local f = fs.open(localPath, "w")
+        if f then
             f.write(fRes.readAll())
             f.close()
-            fRes.close()
         end
+        fRes.close()
     end
 
     drawFrame(idx / total)
 end
 
+-- ── Post-download: update inf.conf if this was an update ─────────────────────
 if isUpdate or not integrityOk then
     local fwrdVal = "none"
-    local fwrRes = http.get(FWRD_URL)
+    local fwrRes  = http.get(FWRD_URL)
     if fwrRes then
         fwrdVal = fwrRes.readAll():gsub("%s+", "")
         fwrRes.close()
     end
 
     config.version = remoteVersion or config.version
-    config.fwrd = fwrdVal
+    config.fwrd    = fwrdVal
 
     local f = fs.open(INF_PATH, "w")
-    f.write(textutils.serialize(config))
-    f.close()
+    if f then
+        f.write(textutils.serialize(config))
+        f.close()
+    end
 
     if not integrityOk and not isUpdate then
         os.pullEvent = nativePull
 
         local verfailOk = false
-
         if fs.exists(VERFAIL_SCRIPT) then
             local hRes2 = http.get(HASH_URL)
             if hRes2 then
@@ -352,9 +412,7 @@ if isUpdate or not integrityOk then
                         if vf then
                             local vContent = vf.readAll() or ""
                             vf.close()
-                            if calculateHash(vContent) == expectedHash then
-                                verfailOk = true
-                            end
+                            verfailOk = calculateHash(vContent) == expectedHash
                         end
                     else
                         verfailOk = true
@@ -387,6 +445,7 @@ if isUpdate or not integrityOk then
         end
         return
     end
+
     os.reboot()
 end
 
