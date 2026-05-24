@@ -241,64 +241,21 @@ end
 local w, h = term.getSize()
 
 -- NFP image data embedded as strings (avoids file dependency)
-local IMG1_DATA = {
-    "  0  0  0  0 f",
-    " 000000000000",
-    "00          00",
-    " 0          0",
-    "00  000000  00",
-    " 0  0eeee0  0",
-    "00  000000  00",
-    " 0          0",
-    "00          00",
-    " 000000000000",
-    "f 0  0  0  0",
-}
-local IMG2_DATA = {
-    "     1111   f",
-    "     1111",
-    "     1111",
-    "     1111",
-    "     1111",
-    "     1111",
-    "  1111111111",
-    "  1111111111",
-    "   11111111",
-    "    111111",
-    "f    1111",
-}
-
--- Fixed NFP parser:
--- Each character in a line is either:
---   a hex digit  → sets the current color (does NOT emit a pixel)
---   a space      → emits one pixel with the current color
--- Special: 'f' at start of a color sequence = transparent (nil)
-local function parseNfp(data)
-    local img = {}
-    for _, line in ipairs(data) do
-        local row     = {}
-        local curColor = nil
-        for i = 1, #line do
-            local ch = line:sub(i, i)
-            if ch == " " then
-                row[#row + 1] = curColor
-            else
-                local hex = tonumber(ch, 16)
-                if hex then
-                    curColor = 2 ^ hex
-                end
-                -- color character itself does not emit a pixel
-            end
-        end
-        img[#img + 1] = row
-    end
-    return img
+local function loadNfp(path)
+    local f = fs.open(path, "r")
+    if not f then return nil end
+    local ok, img = pcall(paintutils.parseImage, f.readAll())
+    f.close()
+    return (ok and img and #img > 0) and img or nil
 end
 
 local images = {
-    parseNfp(IMG1_DATA),
-    parseNfp(IMG2_DATA),
+    loadNfp("update1.nfp"),
+    loadNfp("update2.nfp"),
 }
+for _j = 1, 2 do
+    if not images[_j] then images[_j] = {{colors.black}} end
+end
 
 local labelText = "Instalace aktualizace systemu"
 local barWidth  = 20
