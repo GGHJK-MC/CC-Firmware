@@ -119,26 +119,27 @@ mRes.close()
 
 -- Loading screen setup
 local w, h = term.getSize()
--- local images = {                                      -- ZAKOMENTOVÁNO: načítání ikon
---     paintutils.loadImage("update1.nfp"),              -- ZAKOMENTOVÁNO: ikona 1
---     paintutils.loadImage("update2.nfp"),              -- ZAKOMENTOVÁNO: ikona 2
--- }                                                     -- ZAKOMENTOVÁNO
+local images = {
+    paintutils.loadImage("update1.nfp"),
+    paintutils.loadImage("update2.nfp"),
+}
 local labelText = "Instalace aktualizace systemu"
 local barWidth = 20
 local barX = math.floor((w - barWidth) / 2) + 1
 local barY = h - 1
 
--- local imgW = 0                                        -- ZAKOMENTOVÁNO: výpočet šířky ikony
--- for _, row in ipairs(images[1]) do                   -- ZAKOMENTOVÁNO
---    if #row > imgW then imgW = #row end               -- ZAKOMENTOVÁNO
--- end                                                   -- ZAKOMENTOVÁNO
--- local imgH = #images[1]                              -- ZAKOMENTOVÁNO: výška ikony
--- local imgX = math.floor((w - imgW) / 2) + 1         -- ZAKOMENTOVÁNO: pozice X ikony
--- local imgY = math.floor((h - imgH - 4) / 2) + 1     -- ZAKOMENTOVÁNO: pozice Y ikony
+local imgW = 0
+for _, row in ipairs(images[1]) do
+   if #row > imgW then imgW = #row end
+end
+local imgH = #images[1]
+local imgX = math.floor((w - imgW) / 2) + 1
+local imgY = math.floor((h - imgH - 4) / 2) + 1
 local textX = math.floor((w - #labelText) / 2) + 1
-local textY = math.floor(h / 2) - 1                    -- upraveno: textY bez závislosti na imgY
--- local frameIdx = 1                                   -- ZAKOMENTOVÁNO: index snímku animace
--- local lastFrameTime = os.clock()                     -- ZAKOMENTOVÁNO: časovač animace
+local textY = imgY + imgH + 1
+
+local frameIdx = 1
+local lastFrameTime = os.clock()
 
 local function drawBar(progress)
     local filled = math.floor(barWidth * progress)
@@ -154,16 +155,16 @@ local function drawBar(progress)
 end
 
 local function drawFrame(progress)
-    -- local now = os.clock()                           -- ZAKOMENTOVÁNO: přepínání snímků animace
-    -- if now - lastFrameTime >= 1 then                 -- ZAKOMENTOVÁNO
-    --     frameIdx = (frameIdx % #images) + 1         -- ZAKOMENTOVÁNO
-    --     lastFrameTime = now                          -- ZAKOMENTOVÁNO
-    -- end                                              -- ZAKOMENTOVÁNO
+    local now = os.clock()
+    if now - lastFrameTime >= 1 then
+        frameIdx = (frameIdx % #images) + 1
+        lastFrameTime = now
+    end
 
     term.setBackgroundColor(colors.black)
     term.clear()
 
-    -- paintutils.drawImage(images[frameIdx], imgX, imgY) -- ZAKOMENTOVÁNO: vykreslení ikony
+    paintutils.drawImage(images[frameIdx], imgX, imgY)
 
     term.setBackgroundColor(colors.black)
     term.setTextColor(colors.white)
