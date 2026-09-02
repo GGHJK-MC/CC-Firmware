@@ -1,5 +1,8 @@
-os.pullEvent = os.pullEventRaw
+_G.originalevnt = os.pullEvent
 
+if os.pullEventRaw then
+    os.pullEvent = os.pullEventRaw
+end
 local function sha256(msg)
     local band, bxor, bor, bnot = bit32.band, bit32.bxor, bit32.bor, bit32.bnot
     local rshift, lshift, rrotate = bit32.rshift, bit32.lshift, bit32.rrotate
