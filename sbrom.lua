@@ -98,12 +98,6 @@ if fs.exists(socketPath) then
     end
 end
 
-local undevurl = http.get("https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/refs/heads/master/dev.json")
-if not undevurl then return end
-local unlockd = textutils.unserializeJSON(undevurl.readAll())
-undevurl.close()
-local id         = os.getComputerID()
-local unstate    = unlockd["pc" .. id] or "no"
 local nativePull = os.pullEvent
 
 local MANIFEST_URL   = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/installmn.json"
@@ -148,7 +142,7 @@ if remoteVersion and isNewerVersion(remoteVersion, localVersion) then
     needsDownload = true
     if fs.exists("/fw") then
         for _, file in ipairs(fs.list("/fw")) do
-            if file ~= "inf.conf" then
+            if file ~= "inf.conf" and file ~= "seccfg" then
                 fs.delete(fs.combine("/fw", file))
             end
         end
@@ -218,10 +212,8 @@ if not needsDownload then
     return
 end
 
--- ── Loading screen ────────────────────────────────────────────
 local w, h = term.getSize()
 
--- Embedded NFP images (každý znak = jeden pixel, hex digit = barva)
 local IMG1_LINES = {
     "  0  0  0  0 f",
     " 000000000000",
@@ -249,9 +241,6 @@ local IMG2_LINES = {
     "f    1111",
 }
 
--- Opravený NFP parser:
---   každý hex znak = pixel s danou barvou (bit32.lshift(1, hex) = integer)
---   mezera = průhledný pixel (0), paintutils porovnává číslo > 0, ne boolean
 local function parseNfp(lines)
     local img = {}
     for _, line in ipairs(lines) do
@@ -318,11 +307,9 @@ local function drawFrame(progress)
     drawBar(progress)
 end
 
--- ── Download ──────────────────────────────────────────────────
 local total = #toDownload
 
 for idx, mFile in ipairs(toDownload) do
-    -- Ukáže progress před stažením
     drawFrame((idx - 1) / total)
 
     local localPath = fs.combine(mFile.dir, mFile.name)
@@ -341,12 +328,10 @@ for idx, mFile in ipairs(toDownload) do
         fRes.close()
     end
 
-    -- Ukáže aktualizovaný progress po stažení, pak počká 0.5s
     drawFrame(idx / total)
     sleep(0.5)
 end
 
--- ── Post-download ─────────────────────────────────────────────
 if isUpdate or not integrityOk then
     local fwrdVal = "none"
     local fwrRes  = http.get(FWRD_URL)
