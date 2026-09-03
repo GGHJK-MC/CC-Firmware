@@ -1,6 +1,6 @@
 label = "System Info"
 color = "colors.blue"
-desc = "Info o systému"
+desc = "Info o systemu"
 
 local w, h = term.getSize()
 
