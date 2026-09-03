@@ -1,5 +1,5 @@
 label = "Sprava hesel"
-color = "colors.orange"
+color = "colors.yellow"
 desc = "FW heslo a startup heslo"
 
 local popup = require("fw.api.popup")
