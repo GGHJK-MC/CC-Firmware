@@ -105,7 +105,7 @@ local VERSION_URL    = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/m
 local FWRD_URL       = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/fwrd.txt"
 local HASH_URL       = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/gvbchechsum.json"
 local INF_PATH       = "/fw/inf.conf"
-local PRELOADER      = "/fw/preloader.autorun"
+local PRELOADER      = "/fw/preloader"
 local VERFAIL_SCRIPT = "/fw/warn/verfail.lua"
 
 local function loadConfig()
