@@ -62,7 +62,7 @@ local function center(y, bg, fg, s)
     put(math.floor((W - #s) / 2) + 1, y, bg, fg, s)
 end
 
-local FW_TITLE = "GGHJK UEFI  v3.0"
+local FW_TITLE = "GGHJK UEFI"
 
 local function drawHeader(left, title, xo)
     xo = xo or 0
