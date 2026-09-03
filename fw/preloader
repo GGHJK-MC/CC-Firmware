@@ -1,0 +1,183 @@
+_G.originalevnt = os.pullEvent()
+
+if os.pullEventRaw then
+    os.pullEvent = os.pullEventRaw
+end
+
+local nOpen = fs.open
+local nExists = fs.exists
+local nDelete = fs.delete
+local nMove = fs.move
+local nCopy = fs.copy
+local nMakeDir = fs.makeDir
+
+local function norm(path)
+    return "/" .. fs.combine("", path)
+end
+
+local function isFWPath(path)
+    return norm(path):sub(1, 4) == "/fw/"
+end
+
+local secureOpen = function(path, mode)
+    local isWrite = (mode == "w") or (mode == "a")
+    if isFWPath(path) and isWrite then
+        error("FW Security: zapis do '" .. norm(path) .. "' odepren", 2)
+    end
+    return nOpen(path, mode)
+end
+
+local secureDelete = function(path)
+    if isFWPath(path) then
+        error("FW Security: mazani '" .. norm(path) .. "' odepren", 2)
+    end
+    return nDelete(path)
+end
+
+local secureMove = function(from, to)
+    if isFWPath(from) or isFWPath(to) then
+        error("FW Security: presun '" .. norm(from) .. "' odepren", 2)
+    end
+    return nMove(from, to)
+end
+
+local secureCopy = function(from, to)
+    if isFWPath(to) then
+        error("FW Security: kopie do '" .. norm(to) .. "' odepren", 2)
+    end
+    return nCopy(from, to)
+end
+
+local secureMakeDir = function(path)
+    if isFWPath(path) then
+        error("FW Security: vytvoreni slozky v '" .. norm(path) .. "' odepreno", 2)
+    end
+    return nMakeDir(path)
+end
+
+fs.open = secureOpen
+fs.delete = secureDelete
+fs.move = secureMove
+fs.copy = secureCopy
+fs.makeDir = secureMakeDir
+_G.fs = fs
+
+_G.fwSetBootMode = function(newMode)
+    if newMode ~= "normal" and newMode ~= "safemode" then
+        return false, "neplatny bootmode"
+    end
+    local f = nOpen("/fw/seccfg/bootmode", "w")
+    if not f then
+        return false, "nelze otevrit bootmode"
+    end
+    f.write(newMode)
+    f.close()
+    return true
+end
+
+local mode = "normal"
+local bFile = nOpen("/fw/seccfg/bootmode", "r")
+if bFile then
+    local c = bFile.readAll()
+    bFile.close()
+    if c then mode = c:gsub("%s+", "") end
+end
+
+local startHash = nil
+local shFile = nOpen("/fw/seccfg/starthash", "r")
+if shFile then
+    local c = shFile.readAll()
+    shFile.close()
+    if c and c:gsub("%s+", "") ~= "" then
+        startHash = c:gsub("%s+", "")
+    end
+end
+
+local sha = dofile("/fw/api/sha256")
+local popup = require("api.popup")
+
+-- Ošetření bílých znaků v načteném startHash
+local cleanHash = startHash and startHash:gsub("%s+", "") or ""
+
+if cleanHash ~= "" then
+    local attempts = 0
+    local maxAttempts = 5
+    local unlocked = false
+
+    while attempts < maxAttempts do
+        local placeholder = (attempts > 0)
+            and ("Spatne heslo! (" .. attempts .. "/" .. maxAttempts .. ")")
+            or "Zadejte startup heslo:"
+
+        local input = popup.input("GGHJK UEFI - Uzamceno", "", placeholder)
+
+        -- Pokud uživatel stiskl Zrušit
+        if not input then
+            break
+        end
+
+        -- Ověření hesla
+        if sha.verify(input, cleanHash) then
+            unlocked = true
+            break
+        end
+
+        attempts = attempts + 1
+    end
+
+    if not unlocked then
+        term.setBackgroundColor(colors.black)
+        term.clear()
+        term.setTextColor(colors.red)
+        local w, h = term.getSize()
+        local msg = "Pristup odepren. Vypinani."
+        term.setCursorPos(math.floor((w - #msg) / 2) + 1, math.floor(h / 2))
+        term.write(msg)
+        sleep(2)
+        os.shutdown()
+    end
+
+    term.setBackgroundColor(colors.black)
+    term.clear()
+end
+
+if mode == "safemode" then
+    local f = nOpen("/fw/seccfg/bootmode", "w")
+    if f then
+        f.write("")
+        f.close()
+    end
+
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
+    term.clear()
+    term.setCursorPos(1, 1)
+    shell.run("shell")
+    return
+end
+
+    if nExists("/fw/initramfs.lua") then
+        local f = nOpen("/fw/initramfs.lua", "r")
+        local content = f.readAll()
+        f.close()
+        local fn, err = load(content, "=initramfs", "t", _ENV)
+        if fn then
+            fn()
+        else
+            term.setBackgroundColor(colors.black)
+            term.setTextColor(colors.red)
+            term.clear()
+            term.setCursorPos(1, 1)
+            print("Chyba pri parsovani initramfs.lua")
+            print(tostring(err))
+            sleep(3)
+        end
+        return
+    else
+        term.setBackgroundColor(colors.black)
+        term.setTextColor(colors.red)
+        term.clear()
+        term.setCursorPos(1, 1)
+        print("Chyba: /fw/initramfs.lua nebyl nalezen!")
+        sleep(2)
+    end

@@ -1,0 +1,201 @@
+local notify = {}
+
+notify.INFO  = "info"
+notify.OK    = "ok"
+notify.WARN  = "warn"
+notify.ERROR = "error"
+
+local TYPE_STYLE = {
+    info  = { bar = colors.cyan,   icon = "\7"   },
+    ok    = { bar = colors.lime,   icon = "\4"   },
+    warn  = { bar = colors.orange, icon = "!"    },
+    error = { bar = colors.red,    icon = "\215" },
+}
+
+local CFG = {
+    width    = 24,
+    duration = 4,
+    fps      = 0.05,
+    speed    = 3,
+    gap      = 1,
+    margin_x = 1,
+    margin_y = 1,
+}
+
+local queue  = {}
+local active = {}
+
+local function fill(x1, y1, x2, y2, bg, fg, ch)
+    if x1 > x2 or y1 > y2 then return end
+    term.setBackgroundColor(bg)
+    if fg then term.setTextColor(fg) end
+    local s = string.rep(ch or " ", x2 - x1 + 1)
+    for y = y1, y2 do
+        term.setCursorPos(x1, y)
+        term.write(s)
+    end
+end
+
+local function drawNotif(n, x)
+    local W     = CFG.width
+    local style = TYPE_STYLE[n.kind] or TYPE_STYLE.info
+    local y     = n.y
+    local tw    = select(1, term.getSize())
+
+    local function safe(sx, sy, bg, fg, str)
+        if sx < 1 or sy < 1 or sx > tw then return end
+        term.setBackgroundColor(bg)
+        term.setTextColor(fg)
+        term.setCursorPos(sx, sy)
+
+        local maxLen = tw - sx + 1
+        term.write(str:sub(1, maxLen))
+    end
+
+    fill(x, y, x + W - 1, y, colors.gray)
+    local lbl = style.icon .. " " .. n.title
+
+    safe(x + 1, y, colors.gray, colors.white, lbl:sub(1, W - 3))
+
+    safe(x + W - 1, y, colors.gray, colors.lightGray, "x")
+
+    local barW   = W - 2
+    local filled = math.floor(n.progress * barW + 0.5)
+
+    safe(x,         y + 1, colors.gray, colors.gray, " ")
+
+    for i = filled + 1, barW do
+        safe(x + i, y + 1, colors.gray, colors.gray, " ")
+    end
+
+    for i = 1, filled do
+        safe(x + i, y + 1, style.bar, style.bar, " ")
+    end
+
+    safe(x + W - 1, y + 1, colors.gray, colors.gray, " ")
+
+    fill(x, y + 2, x + W - 1, y + 3, colors.gray)
+    if n.body and n.body ~= "" then
+        local inner = W - 2
+        safe(x + 1, y + 2, colors.gray, colors.lightGray, n.body:sub(1, inner))
+        local l2 = n.body:sub(inner + 1, inner * 2)
+        if l2 ~= "" then
+            safe(x + 1, y + 3, colors.gray, colors.lightGray, l2)
+        end
+    end
+end
+
+local function clearNotif(n, x)
+    fill(x, n.y, x + CFG.width - 1, n.y + 3, colors.black)
+end
+
+local function slotY(slot)
+    return CFG.margin_y + (slot - 1) * (4 + CFG.gap)
+end
+
+local function animLoop()
+    local W = select(1, term.getSize())
+    local finalX = W - CFG.width - CFG.margin_x + 1
+    local slots  = {}
+    local MAX    = 3
+
+    local function freeSlot()
+        for i = 1, MAX do if not slots[i] then return i end end
+    end
+
+    while true do
+
+        while #queue > 0 do
+            local s = freeSlot()
+            if not s then break end
+            local n = table.remove(queue, 1)
+            n.slot     = s
+            n.x        = W + 1
+            n.y        = slotY(s)
+            n.phase    = "in"
+            n.progress = 1.0
+            slots[s]   = n
+            table.insert(active, n)
+        end
+
+        local W2 = select(1, term.getSize())
+        finalX = W2 - CFG.width - CFG.margin_x + 1
+
+        local toRemove = {}
+
+        for i, n in ipairs(active) do
+            if n.phase == "in" then
+                n.x = n.x - CFG.speed
+                if n.x <= finalX then
+                    n.x    = finalX
+                    n.phase = "hold"
+                    n.holdTicks = math.floor(CFG.duration / CFG.fps)
+                    n.holdLeft  = n.holdTicks
+                end
+                drawNotif(n, n.x)
+
+            elseif n.phase == "hold" then
+                n.holdLeft  = n.holdLeft - 1
+                n.progress  = n.holdLeft / n.holdTicks
+                if n.holdLeft <= 0 then
+                    n.phase = "out"
+                end
+                drawNotif(n, n.x)
+
+            elseif n.phase == "out" then
+                clearNotif(n, n.x)
+                n.x = n.x + CFG.speed
+                if n.x > W2 then
+                    clearNotif(n, n.x - CFG.speed)
+                    slots[n.slot] = nil
+                    table.insert(toRemove, i)
+                else
+                    drawNotif(n, n.x)
+                end
+            end
+        end
+
+        for i = #toRemove, 1, -1 do
+            table.remove(active, toRemove[i])
+        end
+
+        if #active == 0 and #queue == 0 then return end
+
+        sleep(CFG.fps)
+    end
+end
+
+function notify.send(title, body, kind)
+    kind = kind or notify.INFO
+    table.insert(queue, {
+        title = title or "",
+        body  = body  or "",
+        kind  = kind,
+    })
+
+    parallel.waitForAny(
+        animLoop,
+        function() coroutine.yield() end
+    )
+
+end
+
+function notify._run()
+    animLoop()
+end
+
+function notify.sendWait(title, body, kind)
+    kind = kind or notify.INFO
+    table.insert(queue, {
+        title = title or "",
+        body  = body  or "",
+        kind  = kind,
+    })
+    animLoop()
+end
+
+function notify.withLoop(fn)
+    parallel.waitForAny(fn, animLoop)
+end
+
+return notify
