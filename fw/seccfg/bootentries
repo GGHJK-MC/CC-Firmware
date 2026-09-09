@@ -1,0 +1,7 @@
+{
+  {
+    priority = 100,
+    name = "Default",
+    path = "/boot1",
+  },
+}

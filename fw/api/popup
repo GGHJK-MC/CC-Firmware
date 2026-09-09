@@ -1,0 +1,319 @@
+local popup = {}
+
+local function saveScreen(x1, y1, x2, y2)
+    local saved = {}
+    for y = y1, y2 do
+        saved[y] = {}
+        for x = x1, x2 do
+            term.setCursorPos(x, y)
+
+        end
+    end
+    return saved
+end
+
+local function drawBox(x1, y1, x2, y2, titleBg, titleFg, bodyBg, title)
+    local w = x2 - x1 + 1
+
+    term.setBackgroundColor(colors.gray)
+    for sy = y1 + 1, y2 + 1 do
+        term.setCursorPos(x2 + 1, sy)
+        term.write(" ")
+    end
+    for sx = x1 + 1, x2 + 1 do
+        term.setCursorPos(sx, y2 + 1)
+        term.write(" ")
+    end
+
+    term.setBackgroundColor(bodyBg)
+    for y = y1, y2 do
+        term.setCursorPos(x1, y)
+        term.write(string.rep(" ", w))
+    end
+
+    term.setBackgroundColor(titleBg)
+    term.setCursorPos(x1, y1)
+    term.write(string.rep(" ", w))
+    term.setTextColor(titleFg)
+    local tx = x1 + math.floor((w - #title) / 2)
+    term.setCursorPos(tx, y1)
+    term.write(title)
+
+    term.setBackgroundColor(bodyBg)
+    term.setTextColor(colors.gray)
+    term.setCursorPos(x1, y1 + 1)
+    term.write(string.rep("\140", w))
+end
+
+local function wrapText(text, maxW)
+    local lines = {}
+    local words = {}
+    for word in text:gmatch("%S+") do words[#words+1] = word end
+    local line = ""
+    for _, w in ipairs(words) do
+        if #line == 0 then
+            line = w
+        elseif #line + 1 + #w <= maxW then
+            line = line .. " " .. w
+        else
+            lines[#lines+1] = line
+            line = w
+        end
+    end
+    if #line > 0 then lines[#lines+1] = line end
+    return lines
+end
+
+local function basePopup(opts)
+
+    local tw, th = term.getSize()
+    local maxW = math.min(40, tw - 6)
+    local lines = wrapText(opts.message or "", maxW - 4)
+    local hasInput = opts.input
+    local btnCount = #(opts.buttons or {})
+
+    local innerH = #lines + (hasInput and 3 or 0) + (btnCount > 0 and 2 or 0)
+    local boxW = maxW
+    local boxH = innerH + 3
+
+    local bx = math.floor((tw - boxW) / 2) + 1
+    local by = math.floor((th - boxH) / 2)
+
+    term.setBackgroundColor(colors.gray)
+
+    for dy = 1, th do
+        term.setCursorPos(1, dy)
+
+    end
+
+    drawBox(bx, by, bx + boxW - 1, by + boxH - 1,
+            opts.titleBg or colors.blue,
+            opts.titleFg or colors.white,
+            opts.bodyBg  or colors.lightGray,
+            (opts.icon and opts.icon .. " " or "") .. opts.title)
+
+    term.setBackgroundColor(opts.bodyBg or colors.lightGray)
+    term.setTextColor(colors.black)
+    for i, l in ipairs(lines) do
+        term.setCursorPos(bx + 2, by + 1 + i)
+        term.write(l)
+    end
+
+    local inputY = by + 2 + #lines
+    local inputResult = opts.inputDefault or ""
+    if hasInput then
+        term.setBackgroundColor(colors.white)
+        term.setCursorPos(bx + 2, inputY)
+        term.write(string.rep(" ", boxW - 4))
+        term.setCursorPos(bx + 2, inputY)
+        term.setTextColor(colors.black)
+    end
+
+    local btnY = by + boxH - 1
+    local function drawButtons(active)
+        local btns = opts.buttons or {}
+        local totalW = 0
+        for _, b in ipairs(btns) do totalW = totalW + #b.label + 4 end
+        totalW = totalW + (#btns - 1)
+        local bstart = bx + math.floor((boxW - totalW) / 2)
+        local cx = bstart
+        for i, b in ipairs(btns) do
+            local bg = (i == active) and (b.activeBg or colors.blue) or (b.bg or colors.gray)
+            local fg = (i == active) and colors.white or colors.lightGray
+            term.setBackgroundColor(bg)
+            term.setTextColor(fg)
+            term.setCursorPos(cx, btnY)
+            term.write("  " .. b.label .. "  ")
+            b._x1 = cx
+            b._x2 = cx + #b.label + 3
+            cx = cx + #b.label + 4 + 1
+        end
+    end
+
+    local activeBtn = 1
+    drawButtons(activeBtn)
+
+    if hasInput then
+
+        local cursorX = bx + 2 + #inputResult
+        local function redrawInput(pw)
+            term.setBackgroundColor(colors.white)
+            term.setCursorPos(bx + 2, inputY)
+            local disp = pw and string.rep("*", #inputResult) or inputResult
+            term.setTextColor(colors.black)
+            term.write(disp .. string.rep(" ", boxW - 4 - #inputResult))
+            term.setCursorPos(bx + 2 + #inputResult, inputY)
+            term.setCursorBlink(true)
+        end
+        redrawInput(opts.passwordMode)
+
+        while true do
+            local ev, p1, p2, p3 = os.pullEvent()
+            if ev == "char" then
+                if #inputResult < boxW - 6 then
+                    inputResult = inputResult .. p1
+                    redrawInput(opts.passwordMode)
+                end
+            elseif ev == "key" then
+                if p1 == keys.backspace and #inputResult > 0 then
+                    inputResult = inputResult:sub(1, -2)
+                    redrawInput(opts.passwordMode)
+                elseif p1 == keys.enter then
+                    term.setCursorBlink(false)
+                    return "ok", inputResult
+                elseif p1 == keys.tab then
+                    activeBtn = (activeBtn % #(opts.buttons or {{"ok"}})) + 1
+                    drawButtons(activeBtn)
+                end
+            elseif ev == "mouse_click" then
+                local mx, my = p2, p3
+                local btns = opts.buttons or {}
+                for i, b in ipairs(btns) do
+                    if b._x1 and mx >= b._x1 and mx <= b._x2 and my == btnY then
+                        term.setCursorBlink(false)
+                        return b.id or b.label, inputResult
+                    end
+                end
+            end
+        end
+    else
+
+        while true do
+            local ev, p1, p2, p3 = os.pullEvent()
+            if ev == "key" then
+                if p1 == keys.enter or p1 == keys.space then
+                    local btns = opts.buttons or {}
+                    local b = btns[activeBtn]
+                    return b and (b.id or b.label) or "ok"
+                elseif p1 == keys.left or p1 == keys.tab then
+                    activeBtn = ((activeBtn - 2) % #(opts.buttons or {1})) + 1
+                    drawButtons(activeBtn)
+                elseif p1 == keys.right then
+                    activeBtn = (activeBtn % #(opts.buttons or {1})) + 1
+                    drawButtons(activeBtn)
+                end
+            elseif ev == "mouse_click" then
+                local mx, my = p2, p3
+                local btns = opts.buttons or {}
+                for i, b in ipairs(btns) do
+                    if b._x1 and mx >= b._x1 and mx <= b._x2 and my == btnY then
+                        return b.id or b.label
+                    end
+                end
+            end
+        end
+    end
+end
+
+function popup.info(title, message)
+    basePopup({
+        title   = title,
+        icon    = "\7",
+        message = message,
+        titleBg = colors.blue,
+        titleFg = colors.white,
+        bodyBg  = colors.lightGray,
+        buttons = { { label = "OK", id = "ok", activeBg = colors.blue } },
+    })
+end
+
+function popup.error(title, message)
+    basePopup({
+        title   = title,
+        icon    = "\215",
+        message = message,
+        titleBg = colors.red,
+        titleFg = colors.white,
+        bodyBg  = colors.lightGray,
+        buttons = { { label = "OK", id = "ok", activeBg = colors.red } },
+    })
+end
+
+function popup.warn(title, message)
+    basePopup({
+        title   = title,
+        icon    = "!",
+        message = message,
+        titleBg = colors.orange,
+        titleFg = colors.black,
+        bodyBg  = colors.lightGray,
+        buttons = { { label = "OK", id = "ok", activeBg = colors.orange } },
+    })
+end
+
+function popup.confirm(title, message)
+    local res = basePopup({
+        title   = title,
+        icon    = "?",
+        message = message,
+        titleBg = colors.blue,
+        titleFg = colors.white,
+        bodyBg  = colors.lightGray,
+        buttons = {
+            { label = "Zrusit", id = "cancel", bg = colors.gray,  activeBg = colors.gray  },
+            { label = "Potvrdit", id = "ok",   bg = colors.gray,  activeBg = colors.green },
+        },
+    })
+    return res == "ok"
+end
+
+function popup.input(title, default, placeholder)
+    local res, text = basePopup({
+        title        = title,
+        icon         = ">",
+        message      = placeholder or "Zadejte hodnotu:",
+        titleBg      = colors.cyan,
+        titleFg      = colors.black,
+        bodyBg       = colors.lightGray,
+        input        = true,
+        inputDefault = default or "",
+        buttons = {
+            { label = "Zrusit",  id = "cancel", bg = colors.gray, activeBg = colors.gray  },
+            { label = "Potvrdit", id = "ok",    bg = colors.gray, activeBg = colors.cyan  },
+        },
+    })
+    if res == "cancel" then return nil end
+    return text
+end
+
+function popup.password(title, placeholder)
+    local res, text = basePopup({
+        title        = title,
+        icon         = "*",
+        message      = placeholder or "Zadejte heslo:",
+        titleBg      = colors.gray,
+        titleFg      = colors.white,
+        bodyBg       = colors.lightGray,
+        input        = true,
+        passwordMode = true,
+        inputDefault = "",
+        buttons = {
+            { label = "Zrusit",  id = "cancel", bg = colors.gray, activeBg = colors.gray },
+            { label = "OK",      id = "ok",     bg = colors.gray, activeBg = colors.blue },
+        },
+    })
+    if res == "cancel" then return nil end
+    return text
+end
+
+function popup.toast(message, duration)
+    duration = duration or 2
+    local tw, th = term.getSize()
+
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
+    term.setCursorPos(1, th)
+    term.write(string.rep(" ", tw))
+    term.setBackgroundColor(colors.cyan)
+    term.setTextColor(colors.black)
+    local msg = "  \7 " .. message .. "  "
+    term.setCursorPos(math.floor((tw - #msg) / 2) + 1, th)
+    term.write(msg)
+    sleep(duration)
+
+    term.setBackgroundColor(colors.black)
+    term.setCursorPos(1, th)
+    term.write(string.rep(" ", tw))
+end
+
+return popup
