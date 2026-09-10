@@ -103,7 +103,7 @@ local nativePull = os.pullEvent
 
 local MANIFEST_URL = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/installmn.json"
 local VERSION_URL  = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/ver.txt"
-local FWRD_URL     = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/fwrd.txt"
+local FWRD_URL      = "https://raw.githubusercontent.com/GGHJK-MC/CC-Firmware/master/fwrd.txt"
 local VER_PATH     = "/fw/version.txt"
 local PRELOADER    = "/fw/preloader"
 
@@ -173,10 +173,78 @@ if type(manifest) ~= "table" then
     return
 end
 
+-- ── NFP & RENDERING HELPERS ────────────────────────────────────────────────--
+
+local w, h = term.getSize()
+
+local function parseNfp(lines)
+    local img = {}
+    for _, line in ipairs(lines) do
+        local row = {}
+        for i = 1, #line do
+            local ch  = line:sub(i, i)
+            local hex = tonumber(ch, 16)
+            if hex then
+                row[#row + 1] = bit32.lshift(1, hex)
+            else
+                row[#row + 1] = 0
+            end
+        end
+        img[#img + 1] = row
+    end
+    return img
+end
+
+local CHECK_IMG_LINES = {
+    "   4   ",
+    "  404  ",
+    " 44044 ",
+    "4444444",
+    "444404444",
+}
+
+local checkImage = parseNfp(CHECK_IMG_LINES)
+
+local function drawStatusScreen(img, label, progress)
+    local barWidth = 20
+    local barX     = math.floor((w - barWidth) / 2) + 1
+    local barY     = h - 1
+
+    local imgW = 0
+    for _, row in ipairs(img) do
+        if #row > imgW then imgW = #row end
+    end
+    local imgH  = #img
+    local imgX  = math.floor((w - imgW) / 2) + 1
+    local imgY  = math.floor((h - imgH - 4) / 2) + 1
+    local textX = math.floor((w - #label) / 2) + 1
+    local textY = imgY + imgH + 1
+
+    term.setBackgroundColor(colors.black)
+    term.clear()
+    paintutils.drawImage(img, imgX, imgY)
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
+    term.setCursorPos(textX, textY)
+    term.write(label)
+
+    local filled = math.floor(barWidth * progress)
+    for x = 0, barWidth - 1 do
+        term.setCursorPos(barX + x, barY)
+        term.setBackgroundColor(x < filled and colors.lightBlue or colors.gray)
+        term.write(" ")
+    end
+end
+
+-- ── KONTROLA INTEGRITY ───────────────────────────────────────────────────────--
+
 local toDownload  = {}
 local integrityOk = true
+local totalManifest = #manifest
 
-for _, mFile in ipairs(manifest) do
+for idx, mFile in ipairs(manifest) do
+    drawStatusScreen(checkImage, "Kontrola integrity...", (idx - 1) / totalManifest)
+
     local localPath = fs.combine(mFile.dir, mFile.name)
     local needThis  = false
     if not fs.exists(localPath) then
@@ -198,6 +266,7 @@ for _, mFile in ipairs(manifest) do
         end
     end
     if needThis then table.insert(toDownload, mFile) end
+    drawStatusScreen(checkImage, "Kontrola integrity...", idx / totalManifest)
 end
 
 if not needsDownload then
@@ -206,7 +275,7 @@ if not needsDownload then
     return
 end
 
-local w, h = term.getSize()
+-- ── STAHOVÁNÍ AKTUALIZACE ───────────────────────────────────────────────────--
 
 local IMG1_LINES = {
     "  0  0  0  0 f",
@@ -235,76 +304,28 @@ local IMG2_LINES = {
     "f    1111",
 }
 
-local function parseNfp(lines)
-    local img = {}
-    for _, line in ipairs(lines) do
-        local row = {}
-        for i = 1, #line do
-            local ch  = line:sub(i, i)
-            local hex = tonumber(ch, 16)
-            if hex then
-                row[#row + 1] = bit32.lshift(1, hex)
-            else
-                row[#row + 1] = 0
-            end
-        end
-        img[#img + 1] = row
-    end
-    return img
-end
-
-local images = {
+local updateImages = {
     parseNfp(IMG1_LINES),
     parseNfp(IMG2_LINES),
 }
 
-local labelText = "Instalace aktualizace systemu"
-local barWidth  = 20
-local barX      = math.floor((w - barWidth) / 2) + 1
-local barY      = h - 1
-
-local imgW = 0
-for _, row in ipairs(images[1]) do
-    if #row > imgW then imgW = #row end
-end
-local imgH  = #images[1]
-local imgX  = math.floor((w - imgW) / 2) + 1
-local imgY  = math.floor((h - imgH - 4) / 2) + 1
-local textX = math.floor((w - #labelText) / 2) + 1
-local textY = imgY + imgH + 1
-
+local updateLabel   = "Instalace aktualizace systemu"
 local frameIdx      = 1
 local lastFrameTime = os.clock()
 
-local function drawBar(progress)
-    local filled = math.floor(barWidth * progress)
-    for x = 0, barWidth - 1 do
-        term.setCursorPos(barX + x, barY)
-        term.setBackgroundColor(x < filled and colors.lightBlue or colors.gray)
-        term.write(" ")
-    end
-end
-
-local function drawFrame(progress)
+local function drawUpdateFrame(progress)
     local now = os.clock()
     if now - lastFrameTime >= 1 then
-        frameIdx      = (frameIdx % #images) + 1
+        frameIdx      = (frameIdx % #updateImages) + 1
         lastFrameTime = now
     end
-    term.setBackgroundColor(colors.black)
-    term.clear()
-    paintutils.drawImage(images[frameIdx], imgX, imgY)
-    term.setBackgroundColor(colors.black)
-    term.setTextColor(colors.white)
-    term.setCursorPos(textX, textY)
-    term.write(labelText)
-    drawBar(progress)
+    drawStatusScreen(updateImages[frameIdx], updateLabel, progress)
 end
 
-local total = #toDownload
+local totalToDownload = #toDownload
 
 for idx, mFile in ipairs(toDownload) do
-    drawFrame((idx - 1) / total)
+    drawUpdateFrame((idx - 1) / totalToDownload)
 
     local localPath = fs.combine(mFile.dir, mFile.name)
     local dir       = mFile.dir
@@ -322,7 +343,7 @@ for idx, mFile in ipairs(toDownload) do
         fRes.close()
     end
 
-    drawFrame(idx / total)
+    drawUpdateFrame(idx / totalToDownload)
     sleep(0.5)
 end
 
@@ -370,7 +391,7 @@ if isUpdate or not integrityOk then
                 term.write(text)
             end
 
-            wc(8,  "DEVICE INTEGRITY CHECK FAILED",                      colors.red)
+            wc(8,  "DEVICE INTEGRITY CHECK FAILED",                colors.red)
             wc(9,  "This device is corrupt and cannot be trusted.",       colors.white)
             wc(10, "Boot halted to protect your data.",                   colors.lightGray)
             wc(12, "Possible causes:",                                    colors.lightGray)
